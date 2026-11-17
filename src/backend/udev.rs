@@ -289,7 +289,19 @@ impl State {
                 .copied()
                 .unwrap_or(info.modes()[0]);
             let surface = match u.drm.create_surface(crtc, mode, &[info.handle()]) {
-                Ok(s) => s,
+                Ok(s) => {
+                    let p = s.planes();
+                    info!(
+                        "{}: plans {} principal, {} curseur, {} superposition ; curseur matériel {}×{}",
+                        connector_name(&info),
+                        p.primary.len(),
+                        p.cursor.len(),
+                        p.overlay.len(),
+                        u.drm.cursor_size().w,
+                        u.drm.cursor_size().h
+                    );
+                    s
+                }
                 Err(e) => {
                     warn!("{}: {e}", connector_name(&info));
                     continue;
