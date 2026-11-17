@@ -1023,6 +1023,45 @@ impl State {
         }
     }
 
+    /// La zone utile d'un écran a changé (barre apparue, redimensionnée ou
+    /// fermée): les vues imposées s'y adaptent, et une vue libre dont la
+    /// barre de titre passe au-dessus est redescendue, pour rester
+    /// attrapable
+    pub fn check_zone(&mut self, output: &Output) {
+        let zone = self.usable_area(output);
+        let name = output.name();
+        if self.zones.get(&name) == Some(&zone) {
+            return;
+        }
+        self.zones.insert(name, zone);
+        let screen = self.output_geometry(output);
+        for i in 0..self.views.len() {
+            if !self.views[i].mapped {
+                continue;
+            }
+            let f = self.frame_rect(i);
+            let center = f.loc + f.size.to_point().downscale(2);
+            if !screen.contains(center) {
+                continue;
+            }
+            match self.views[i].tiling.clone() {
+                Tiling::Maximized(a) => self.maximize(i, a),
+                Tiling::Edge(e) => self.snap_to_edge(i, e),
+                Tiling::Region(r) => self.snap_to_region(i, &r),
+                Tiling::Fullscreen => {}
+                Tiling::None => {
+                    if f.loc.y < zone.loc.y && f.loc.y + f.size.h > zone.loc.y {
+                        self.views[i].loc.y += zone.loc.y - f.loc.y;
+                        self.configure(i, None);
+                    }
+                }
+            }
+            if let Some(v) = self.views.get_mut(i) {
+                v.geom_anim = None;
+            }
+        }
+    }
+
     /// Enroule ou déroule une vue, avec l'animation de sa hauteur (§ 10.5)
     pub fn set_shaded(&mut self, i: usize, shaded: bool) {
         let shaded = shaded && self.views[i].tiling != Tiling::Fullscreen;

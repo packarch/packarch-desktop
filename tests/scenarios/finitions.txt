@@ -100,4 +100,21 @@ capture 05-apercu-collage.png
 clock-run
 release left
 wait 500
+# --- Barre qui réserve sa place après coup (waybar lancée après les
+# fenêtres): la vue maximisée s'y adapte, la vue libre est redescendue.
+# Seule la waybar de ce scénario est arrêtée (sa configuration copiée)
+spawn pkill -f captures/finitions/waybar/config
+wait 800
+expect-focus b
+combo 125 16
+wait 500
+expect b 0 0 1280 800
+action <action name="ForEach"><query title="a"/><then><action name="MoveTo" x="0" y="0"/></then></action>
+wait 300
+mark a
+spawn sh -c "grep waybar cfg/autostart | sh"
+wait 2500
+expect b 0 38 1280 724
+expect-moved a 0 38
+capture 06-barre-revenue.png
 quit

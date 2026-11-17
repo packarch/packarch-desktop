@@ -194,6 +194,7 @@ impl State {
             .layer_for_surface(surface, smithay::desktop::WindowSurfaceType::TOPLEVEL)
             .cloned();
         drop(map);
+        self.check_zone(&output);
         let Some(layer) = layer else { return };
         if !initial_sent {
             layer.layer_surface().send_configure();
@@ -645,6 +646,10 @@ impl WlrLayerShellHandler for State {
             if let Some(layer) = layer {
                 map.unmap_layer(&layer);
             }
+        }
+        for output in self.outputs.clone() {
+            layer_map_for_output(&output).arrange();
+            self.check_zone(&output);
         }
         if was_focused {
             self.focus_top();
