@@ -9,7 +9,7 @@ use smithay::backend::input::{
     KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
 };
 use smithay::desktop::Window;
-use smithay::input::keyboard::{FilterResult, Keycode};
+use smithay::input::keyboard::{FilterResult, Keycode, Keysym};
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
     GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
@@ -68,6 +68,57 @@ fn contexts(under: &Under) -> (Vec<Context>, Option<usize>) {
         Under::Layer(_, _, true) | Under::Root => (vec![C::Root], None),
         Under::Layer(_, _, false) => (vec![], None),
     }
+}
+
+/// Résultat du filtre du clavier
+enum KeyResult {
+    Bind(Vec<Action>),
+    /// Touche pour le menu ouvert, et le raccourci qu'elle déclencherait
+    Menu(Keysym, Option<char>, Option<Vec<Action>>),
+}
+
+fn is_modifier(sym: Keysym) -> bool {
+    use smithay::input::keyboard::keysyms as k;
+    matches!(
+        sym.raw(),
+        k::KEY_Shift_L
+            | k::KEY_Shift_R
+            | k::KEY_Control_L
+            | k::KEY_Control_R
+            | k::KEY_Alt_L
+            | k::KEY_Alt_R
+            | k::KEY_Super_L
+            | k::KEY_Super_R
+            | k::KEY_Meta_L
+            | k::KEY_Meta_R
+            | k::KEY_Hyper_L
+            | k::KEY_Hyper_R
+            | k::KEY_ISO_Level3_Shift
+            | k::KEY_ISO_Level5_Shift
+            | k::KEY_Caps_Lock
+            | k::KEY_Num_Lock
+    )
+}
+
+/// Touches de navigation des menus (prioritaires sur les raccourcis)
+fn is_menu_key(sym: Keysym) -> bool {
+    use smithay::input::keyboard::keysyms as k;
+    matches!(
+        sym.raw(),
+        k::KEY_Escape
+            | k::KEY_Up
+            | k::KEY_Down
+            | k::KEY_Left
+            | k::KEY_Right
+            | k::KEY_KP_Up
+            | k::KEY_KP_Down
+            | k::KEY_KP_Left
+            | k::KEY_KP_Right
+            | k::KEY_Return
+            | k::KEY_KP_Enter
+            | k::KEY_Home
+            | k::KEY_End
+    )
 }
 
 impl State {
@@ -180,7 +231,8 @@ impl State {
             KeyState::Released
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let actions = keyboard.input(self, code, state, serial, time, |st, mods, handle| {
+        let menu_open = self.menu.is_some();
+        let result = keyboard.input(self, code, state, serial, time, |st, mods, handle| {
             if !pressed {
                 if let Some(pos) = st.suppressed_keys.iter().position(|k| *k == code) {
                     st.suppressed_keys.remove(pos);
@@ -194,15 +246,49 @@ impl State {
                 .us_keymap
                 .as_ref()
                 .and_then(|k| k.key_get_syms_by_level(code, 0, 0).first().copied());
-            match find_keybind(&st.config.keybinds, Mods::from_state(mods), &translated, physical) {
-                Some(b) => {
+            let bind = find_keybind(&st.config.keybinds, Mods::from_state(mods), &translated, physical)
+                .map(|b| b.actions.clone());
+            if menu_open {
+                // Menu ouvert: les touches lui reviennent, sauf les
+                // modificateurs; un raccourci ferme le menu
+                let sym = handle.modified_sym();
+                if is_modifier(sym) {
+                    return FilterResult::Forward;
+                }
+                st.suppressed_keys.push(code);
+                return FilterResult::Intercept(Some(KeyResult::Menu(sym, sym.key_char(), bind)));
+            }
+            match bind {
+                Some(actions) => {
                     st.suppressed_keys.push(code);
-                    FilterResult::Intercept(Some(b.actions.clone()))
+                    FilterResult::Intercept(Some(KeyResult::Bind(actions)))
                 }
                 None => FilterResult::Forward,
             }
         });
-        if let Some(Some(actions)) = actions {
+        let actions = match result {
+            Some(Some(KeyResult::Bind(actions))) => Some(actions),
+            Some(Some(KeyResult::Menu(sym, ch, bind))) => {
+                let nav = is_menu_key(sym);
+                // Le raccourci du menu ouvert le referme
+                let toggle = bind.as_deref().is_some_and(|b| {
+                    matches!(b, [Action::ShowMenu { menu, .. }]
+                        if self.open_menu_ids().first() == Some(menu))
+                });
+                if toggle && !nav {
+                    self.close_menus();
+                    None
+                } else if nav || bind.is_none() {
+                    self.menu_key(sym, ch);
+                    None
+                } else {
+                    self.close_menus();
+                    bind
+                }
+            }
+            _ => None,
+        };
+        if let Some(actions) = actions {
             let target = self.focused_view().map(|i| self.views[i].window.clone());
             self.run_actions(
                 &actions,
@@ -233,6 +319,7 @@ impl State {
         // Focus qui suit la souris
         if self.config.follow_mouse
             && self.press.is_none()
+            && self.menu.is_none()
             && let Under::View(i, ..) | Under::Frame(i, _) = under
             && self.focused_view() != Some(i)
         {

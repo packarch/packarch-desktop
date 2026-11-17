@@ -22,7 +22,7 @@ for scenario in "$@"; do
 	mkdir -p "$out/cfg" "$out/waybar"
 	sed -e 's|<screenEdgeStrength>[0-9]*<|<screenEdgeStrength>0<|' \
 		-e 's|<windowEdgeStrength>[0-9]*<|<windowEdgeStrength>0<|' "$src/rc.xml" >"$out/cfg/rc.xml"
-	for f in themerc-override environment; do
+	for f in themerc-override environment menu.xml; do
 		[[ -f $src/$f ]] && cp "$src/$f" "$out/cfg/"
 	done
 	{

@@ -6,14 +6,19 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : **version 0.2** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+État : **version 0.3** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
 § 14). Fenêtres décorées par le compositeur (thème Openbox, coins arrondis,
 ombres), couches layer-shell (waybar, swaybg), `rc.xml` complet pour les
 réglages de Packarch : raccourcis (y compris en AZERTY), liaisons de la
-souris, 33 actions, bureaux, collage aux bords et aux régions, résistance des
-bords, règles de fenêtres, `environment`, `autostart`, rechargement
-(`packarch --reconfigure` ou Ctrl+Maj+R). Pas encore de menus (0.3) ni de
-session réelle (backend udev, 0.4).
+souris, bureaux, collage aux bords et aux régions, règles de fenêtres,
+`environment`, `autostart`, rechargement (`packarch --reconfigure` ou
+Ctrl+Maj+R). Menus de `menu.xml` arrondis et ombrés : sous-menus au survol,
+pipemenus asynchrones, icônes (png, svg, thème d'icônes), menu de fenêtre,
+liste des fenêtres, navigation au clavier. Animations : menus, ouverture,
+fermeture, réduction et restauration des fenêtres (réglables dans
+`<animations>`, `--no-animations`). Pas encore de session réelle
+(backend udev, 0.4) ; les animations de maximisation, d'enroulement, de
+changement de bureau et des OSD restent à faire.
 
 ## Essayer
 
@@ -26,7 +31,8 @@ tests/capture.sh
 ```
 
 Options cachées pour les essais : `--backend headless`, `--size 1920x1200`,
-`--scale 1.5`, `--script FICHIER` (format décrit dans `src/script.rs`).
+`--scale 1.5`, `--script FICHIER` (format décrit dans `src/script.rs`, avec
+une horloge simulée pour capturer une animation à un instant donné).
 
 ## Licence
 

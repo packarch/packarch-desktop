@@ -14,6 +14,7 @@ use smithay::backend::renderer::element::surface::{
     WaylandSurfaceRenderElement, render_elements_from_surface_tree,
 };
 use smithay::backend::renderer::element::texture::TextureRenderElement;
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement, RescaleRenderElement};
 use smithay::backend::renderer::element::{AsRenderElements, Id, Kind};
 use smithay::backend::renderer::gles::element::{PixelShaderElement, TextureShaderElement};
 use smithay::backend::renderer::gles::{
@@ -28,10 +29,20 @@ use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform
 use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::warn;
 
+use crate::anim::{Anim, lerp};
 use crate::config::Button;
 use crate::deco::{ButtonState, Layout, button_image};
+use crate::menu::ui::SLIDE;
 use crate::state::State;
 use crate::theme::Color;
+
+render_elements! {
+    pub Base<=GlesRenderer>;
+    Surface=WaylandSurfaceRenderElement<GlesRenderer>,
+    Pixel=PixelShaderElement,
+    Clipped=TextureShaderElement,
+    Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
+}
 
 render_elements! {
     pub Elem<=GlesRenderer>;
@@ -39,6 +50,7 @@ render_elements! {
     Pixel=PixelShaderElement,
     Clipped=TextureShaderElement,
     Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
+    Anim=RelocateRenderElement<RescaleRenderElement<Base>>,
 }
 
 /// Distance signée à un rectangle aux coins arrondis (rayon du haut et du
@@ -247,9 +259,10 @@ fn px(scale: f64) -> f32 {
 fn pixel(
     program: &GlesPixelProgram,
     area: Rectangle<i32, Logical>,
+    alpha: f32,
     uniforms: Vec<Uniform<'_>>,
 ) -> PixelShaderElement {
-    PixelShaderElement::new(program.clone(), area, None, 1.0, uniforms, Kind::Unspecified)
+    PixelShaderElement::new(program.clone(), area, None, alpha, uniforms, Kind::Unspecified)
 }
 
 /// Programmes des shaders, copiés pour la durée d'un rendu
@@ -260,7 +273,158 @@ struct Progs {
     clip: GlesTexProgram,
 }
 
-/// Éléments de rendu d'un écran, du premier plan vers l'arrière-plan
+/// Paramètres du shader du cadre
+#[derive(Clone)]
+struct FrameParams {
+    border_color: Color,
+    title_color: Color,
+    radius: f32,
+    border: f32,
+    title_height: f32,
+}
+
+/// Contenu d'une vue rendu hors écran
+#[derive(Clone)]
+struct Content {
+    texture: GlesTexture,
+    id: Id,
+    /// Géométrie du client, coordonnées globales
+    rect: Rectangle<i32, Logical>,
+    radius: f32,
+}
+
+#[derive(Clone)]
+struct ShadowParams {
+    color: Color,
+    size: i32,
+    radius: f32,
+}
+
+/// Tout ce qu'il faut pour redessiner une vue telle qu'elle était affichée:
+/// sert aux animations de fermeture et de réduction, quand le client n'a
+/// plus d'image
+#[derive(Clone)]
+pub struct Snapshot {
+    /// Cadre, coordonnées globales
+    pub frame: Rectangle<i32, Logical>,
+    /// Images du titre et des boutons: tampon, taille en pixels, destination
+    deco: Vec<(MemoryRenderBuffer, Size<i32, Logical>, Rectangle<i32, Logical>)>,
+    frame_params: Option<FrameParams>,
+    content: Option<Content>,
+    shadow: Option<ShadowParams>,
+}
+
+/// Vue fermée ou réduite, animée jusqu'à disparaître (§ 10.5)
+pub struct Ghost {
+    pub snapshot: Snapshot,
+    pub anim: Anim,
+    pub kind: GhostKind,
+    /// Vue réduite (une restauration interrompt l'animation)
+    pub window: Option<smithay::desktop::Window>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GhostKind {
+    Close,
+    /// Vers ce point (bas de l'écran)
+    Minimize(Point<i32, Logical>),
+}
+
+/// Apparition d'une vue
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Appear {
+    Open,
+    /// Depuis ce point (restauration d'une vue réduite)
+    Restore(Point<i32, Logical>),
+}
+
+/// Transformation d'une image animée
+#[derive(Debug, Clone, Copy)]
+struct Look {
+    alpha: f32,
+    scale: f64,
+    /// Décalage du centre, logique
+    offset: Point<f64, Logical>,
+}
+
+impl Look {
+    fn none() -> Look {
+        Look {
+            alpha: 1.0,
+            scale: 1.0,
+            offset: Point::from((0.0, 0.0)),
+        }
+    }
+
+    fn is_identity(&self) -> bool {
+        self.alpha >= 1.0 && self.scale == 1.0 && self.offset == Point::from((0.0, 0.0))
+    }
+}
+
+/// Apparence d'une vue qui apparaît, à la valeur `p` de son animation
+fn appear_look(kind: Appear, frame: Rectangle<i32, Logical>, p: f64) -> Look {
+    let p = p.max(0.0);
+    match kind {
+        Appear::Open => Look {
+            alpha: p.min(1.0) as f32,
+            scale: lerp(0.94, 1.0, p),
+            offset: Point::from((0.0, 0.0)),
+        },
+        Appear::Restore(from) => minimize_look(frame, from, 1.0 - p),
+    }
+}
+
+/// Réduction: fondu et rétrécissement vers `to`, à la progression `p`
+fn minimize_look(frame: Rectangle<i32, Logical>, to: Point<i32, Logical>, p: f64) -> Look {
+    let p = p.clamp(0.0, 1.0);
+    let center = frame.loc.to_f64() + frame.size.to_f64().to_point().downscale(2.0);
+    let d = to.to_f64() - center;
+    Look {
+        alpha: (1.0 - p) as f32,
+        scale: lerp(1.0, 0.3, p),
+        offset: Point::from((d.x * p, d.y * p)),
+    }
+}
+
+/// Applique une transformation aux éléments d'une image, autour du centre
+/// de `frame`
+fn transform(
+    elements: Vec<Base>,
+    look: Look,
+    frame: Rectangle<i32, Logical>,
+    output_loc: Point<i32, Logical>,
+    scale: f64,
+) -> Vec<Elem> {
+    if look.scale == 1.0 && look.offset == Point::from((0.0, 0.0)) {
+        return elements.into_iter().map(Elem::from).collect();
+    }
+    let center = (frame.loc - output_loc).to_f64() + frame.size.to_f64().to_point().downscale(2.0);
+    let origin = center.to_physical(scale).to_i32_round();
+    let offset = look.offset.to_physical(scale).to_i32_round();
+    elements
+        .into_iter()
+        .map(|e| {
+            Elem::Anim(RelocateRenderElement::from_element(
+                RescaleRenderElement::from_element(e, origin, look.scale),
+                offset,
+                Relocate::Relative,
+            ))
+        })
+        .collect()
+}
+
+impl From<Base> for Elem {
+    fn from(b: Base) -> Elem {
+        match b {
+            Base::Surface(e) => Elem::Surface(e),
+            Base::Pixel(e) => Elem::Pixel(e),
+            Base::Clipped(e) => Elem::Clipped(e),
+            Base::Memory(e) => Elem::Memory(e),
+        }
+    }
+}
+
+/// Éléments d'un écran, du premier plan vers l'arrière-plan
 pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Output) -> Vec<Elem> {
     let scale = output.current_scale().fractional_scale();
     let output_loc = state.output_location(output);
@@ -273,6 +437,7 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         shadow: shaders.shadow.clone(),
         clip: shaders.clip.clone(),
     };
+    let now = state.now();
 
     let layer_elements = |renderer: &mut GlesRenderer, layer: Layer| -> Vec<Elem> {
         let map = layer_map_for_output(output);
@@ -287,11 +452,14 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         out
     };
 
+    // Menus, devant tout le reste
+    elements.extend(menu_elements(state, renderer, scale, output_loc, &progs, now));
+
     let stacking = state.stacking();
     let full = state.fullscreen_top();
     elements.extend(layer_elements(renderer, Layer::Overlay));
     if let Some(i) = full {
-        elements.extend(view_elements(state, renderer, i, scale, output_loc, &progs));
+        elements.extend(animated_view(state, renderer, i, scale, output_loc, &progs, now));
     }
     elements.extend(layer_elements(renderer, Layer::Top));
 
@@ -304,6 +472,7 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         elements.push(Elem::Pixel(pixel(
             &progs.frame,
             Rectangle::new(rect.loc - output_loc, rect.size),
+            1.0,
             vec![
                 Uniform::new(
                     "border_color",
@@ -319,9 +488,25 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         )));
     }
 
+    // Vues fermées ou réduites, encore animées
+    state.ghosts.retain(|g| !g.anim.done(now));
+    for g in state.ghosts.iter().rev() {
+        let p = g.anim.value(now);
+        let look = match g.kind {
+            GhostKind::Close => Look {
+                alpha: (1.0 - p).clamp(0.0, 1.0) as f32,
+                scale: lerp(1.0, 0.94, p),
+                offset: Point::from((0.0, 0.0)),
+            },
+            GhostKind::Minimize(to) => minimize_look(g.snapshot.frame, to, p),
+        };
+        let base = snapshot_elements(&g.snapshot, renderer, &progs, scale, output_loc, look.alpha, None);
+        elements.extend(transform(base, look, g.snapshot.frame, output_loc, scale));
+    }
+
     for &i in stacking.iter().rev() {
         if Some(i) != full {
-            elements.extend(view_elements(state, renderer, i, scale, output_loc, &progs));
+            elements.extend(animated_view(state, renderer, i, scale, output_loc, &progs, now));
         }
     }
 
@@ -330,8 +515,230 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
     elements
 }
 
+/// Éléments d'une vue, avec son animation d'apparition éventuelle
+fn animated_view(
+    state: &mut State,
+    renderer: &mut GlesRenderer,
+    i: usize,
+    scale: f64,
+    output_loc: Point<i32, Logical>,
+    progs: &Progs,
+    now: std::time::Duration,
+) -> Vec<Elem> {
+    let frame = state.frame_rect(i);
+    let look = match state.views[i].appear {
+        Some((anim, kind)) if !anim.done(now) => appear_look(kind, frame, anim.value(now)),
+        Some(_) => {
+            state.views[i].appear = None;
+            Look::none()
+        }
+        None => Look::none(),
+    };
+    let base = view_elements(state, renderer, i, scale, output_loc, progs, look.alpha);
+    if look.is_identity() {
+        base.into_iter().map(Elem::from).collect()
+    } else {
+        transform(base, look, frame, output_loc, scale)
+    }
+}
+
+/// Menus ouverts et menus qui disparaissent: image et ombre (§ 10.4)
+fn menu_elements(
+    state: &mut State,
+    renderer: &mut GlesRenderer,
+    scale: f64,
+    output_loc: Point<i32, Logical>,
+    progs: &Progs,
+    now: std::time::Duration,
+) -> Vec<Elem> {
+    state.menu_images(scale);
+    let mut elements = vec![];
+    let t = state.theme.menu.clone();
+    let mut push = |elements: &mut Vec<Elem>,
+                    image: &crate::menu::ui::MenuImage,
+                    rect: Rectangle<i32, Logical>,
+                    alpha: f32,
+                    dy: f64| {
+        let loc = (rect.loc - output_loc).to_f64() + Point::from((0.0, dy));
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_physical(scale),
+            &image.buffer,
+            Some(alpha),
+            Some(Rectangle::from_size(image.px.to_f64())),
+            Some(rect.size),
+            Kind::Unspecified,
+        ) {
+            Ok(e) => elements.push(Elem::Memory(e)),
+            Err(e) => warn!("image du menu: {e:?}"),
+        }
+        let s = t.shadow_size;
+        if s > 0 && t.shadow_color.a > 0.0 {
+            let r = t.corner_radius as f32;
+            let area = Rectangle::new(
+                (rect.loc - output_loc) + Point::from((-s, dy.round() as i32 - s)),
+                rect.size + Size::from((2 * s, 2 * s)),
+            );
+            elements.push(Elem::Pixel(shadow(
+                progs,
+                area,
+                s,
+                rect.size,
+                r,
+                t.shadow_color,
+                alpha,
+                scale,
+            )));
+        }
+    };
+    if let Some(ms) = state.menu.as_mut() {
+        for level in ms.levels.iter_mut().rev() {
+            let p = match level.anim {
+                Some(a) if !a.done(now) => a.value(now),
+                _ => {
+                    level.anim = None;
+                    1.0
+                }
+            };
+            if let Some(image) = &level.image {
+                let alpha = p.clamp(0.0, 1.0) as f32;
+                push(&mut elements, image, level.rect(), alpha, -SLIDE * (1.0 - p));
+            }
+        }
+    }
+    state.menu_ghosts.retain(|g| !g.anim.done(now));
+    for g in state.menu_ghosts.iter().rev() {
+        let p = g.anim.value(now);
+        push(
+            &mut elements,
+            &g.image,
+            g.rect,
+            (1.0 - p).clamp(0.0, 1.0) as f32,
+            -SLIDE * p,
+        );
+    }
+    elements
+}
+
+/// Ombre d'un rectangle arrondi de taille `size`, placée dans `area`
+fn shadow(
+    progs: &Progs,
+    area: Rectangle<i32, Logical>,
+    s: i32,
+    size: Size<i32, Logical>,
+    radius: f32,
+    color: Color,
+    alpha: f32,
+    scale: f64,
+) -> PixelShaderElement {
+    pixel(
+        &progs.shadow,
+        area,
+        alpha,
+        vec![
+            Uniform::new("shadow_color", color.premultiplied()),
+            Uniform::new("shape", [s as f32, s as f32, size.w as f32, size.h as f32]),
+            Uniform::new("radius_top", radius),
+            Uniform::new("radius_bottom", radius),
+            Uniform::new("sigma", (s as f32 / 2.0).max(0.5)),
+            Uniform::new("px", px(scale)),
+        ],
+    )
+}
+
+/// Éléments d'un instantané: titre et boutons, cadre, contenu (ou `live`,
+/// les surfaces du client), ombre
+fn snapshot_elements(
+    snap: &Snapshot,
+    renderer: &mut GlesRenderer,
+    progs: &Progs,
+    scale: f64,
+    output_loc: Point<i32, Logical>,
+    alpha: f32,
+    live: Option<Vec<Base>>,
+) -> Vec<Base> {
+    let mut elements: Vec<Base> = vec![];
+    for (buf, px_size, rect) in &snap.deco {
+        let loc = (rect.loc - output_loc).to_f64().to_physical(scale);
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc,
+            buf,
+            Some(alpha),
+            Some(Rectangle::from_size(px_size.to_f64())),
+            Some(rect.size),
+            Kind::Unspecified,
+        ) {
+            Ok(e) => elements.push(Base::Memory(e)),
+            Err(e) => warn!("image du cadre: {e:?}"),
+        }
+    }
+    let frame_loc = snap.frame.loc - output_loc;
+    if let Some(f) = &snap.frame_params {
+        elements.push(Base::Pixel(pixel(
+            &progs.frame,
+            Rectangle::new(frame_loc, snap.frame.size),
+            alpha,
+            vec![
+                Uniform::new("border_color", f.border_color.premultiplied()),
+                Uniform::new("title_color", f.title_color.premultiplied()),
+                Uniform::new("radius_top", f.radius),
+                Uniform::new("radius_bottom", f.radius),
+                Uniform::new("border", f.border),
+                Uniform::new("title_height", f.title_height),
+                Uniform::new("px", px(scale)),
+            ],
+        )));
+    }
+    if let Some(c) = &snap.content {
+        let size = c.rect.size;
+        let tex = TextureRenderElement::from_static_texture(
+            c.id.clone(),
+            renderer.context_id(),
+            (c.rect.loc - output_loc).to_f64().to_physical(scale),
+            c.texture.clone(),
+            1,
+            Transform::Normal,
+            Some(alpha),
+            None,
+            Some(size),
+            None,
+            Kind::Unspecified,
+        );
+        elements.push(Base::Clipped(TextureShaderElement::new(
+            tex,
+            progs.clip.clone(),
+            vec![
+                Uniform::new("geo_size", (size.w as f32, size.h as f32)),
+                Uniform::new("radius", c.radius),
+                Uniform::new("px", px(scale)),
+            ],
+        )));
+    }
+    if let Some(live) = live {
+        elements.extend(live);
+    }
+    if let Some(s) = &snap.shadow {
+        let area = Rectangle::new(
+            frame_loc - Point::from((s.size, s.size)),
+            snap.frame.size + Size::from((2 * s.size, 2 * s.size)),
+        );
+        elements.push(Base::Pixel(shadow(
+            progs,
+            area,
+            s.size,
+            snap.frame.size,
+            s.radius,
+            s.color,
+            alpha,
+            scale,
+        )));
+    }
+    elements
+}
+
 /// Éléments d'une vue: fenêtres surgissantes, titre et boutons, cadre,
-/// contenu, ombre
+/// contenu, ombre. L'instantané de la vue est gardé pour les animations
 fn view_elements(
     state: &mut State,
     renderer: &mut GlesRenderer,
@@ -339,8 +746,9 @@ fn view_elements(
     scale: f64,
     output_loc: Point<i32, Logical>,
     progs: &Progs,
-) -> Vec<Elem> {
-    let mut elements: Vec<Elem> = vec![];
+    alpha: f32,
+) -> Vec<Base> {
+    let mut elements: Vec<Base> = vec![];
     let focused = state.focused_root();
     let layout = state.layout(&state.views[i]);
     let config = &state.config;
@@ -350,10 +758,11 @@ fn view_elements(
     let active = focused.as_ref() == Some(view.surface());
     let free = view.is_free();
     let colors = if active { &theme.active } else { &theme.inactive };
-    let frame_loc = view.loc - layout.client.loc - output_loc;
+    let frame_global = Rectangle::new(view.loc - layout.client.loc, layout.size);
     let client_loc = view.loc - output_loc;
     let radius = if free { config.corner_radius } else { 0 } as f32;
     let shaded = view.shaded;
+    let fullscreen = view.tiling == crate::view::Tiling::Fullscreen;
 
     // Fenêtres surgissantes (menus des applications), devant le cadre
     let surface = view.surface().clone();
@@ -365,7 +774,7 @@ fn view_elements(
                 popup.wl_surface(),
                 loc,
                 scale,
-                1.0,
+                alpha,
                 Kind::Unspecified,
             ));
         }
@@ -381,135 +790,164 @@ fn view_elements(
         pressed: view.pressed,
         scale: scale.to_bits(),
     };
-    let border_color = colors.border;
-    let title_bg = colors.title_bg;
+    let frame_params = (layout.size != layout.client.size).then_some(FrameParams {
+        border_color: colors.border,
+        title_color: colors.title_bg,
+        radius,
+        border: layout.border as f32,
+        title_height: layout.title_height as f32,
+    });
     let shadow_size = colors.shadow_size;
     let shadow_color = colors.shadow_color;
-    let shadows = config.drop_shadows
-        && (free || config.drop_shadows_on_tiled)
-        && view.tiling != crate::view::Tiling::Fullscreen;
+    let shadows = config.drop_shadows && (free || config.drop_shadows_on_tiled) && !fullscreen;
+    let shadow = (shadows && shadow_size > 0 && shadow_color.a > 0.0).then_some(ShadowParams {
+        color: shadow_color,
+        size: shadow_size,
+        radius,
+    });
+    let use_offscreen =
+        !shaded && !fullscreen && (radius > layout.border as f32 || config.animations.enabled);
     if layout.title_height > 0 && state.views[i].deco.as_ref().is_none_or(|d| d.key != key) {
         let deco = build_deco(&mut state.text, &state.config, &state.theme, key);
         state.views[i].deco = Some(deco);
     }
     let view = &mut state.views[i];
+    let mut deco = vec![];
     if layout.title_height > 0
-        && let Some(deco) = view.deco.as_ref()
+        && let Some(d) = view.deco.as_ref()
     {
-        let mut mem = |(buf, px_size): &(MemoryRenderBuffer, Size<i32, Logical>),
-                       rect: Rectangle<i32, Logical>| {
-            let loc = (frame_loc + rect.loc).to_f64().to_physical(scale);
-            match MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                loc,
-                buf,
-                None,
-                Some(Rectangle::from_size(px_size.to_f64())),
-                Some(rect.size),
-                Kind::Unspecified,
-            ) {
-                Ok(e) => elements.push(Elem::Memory(e)),
-                Err(e) => warn!("image du cadre: {e:?}"),
-            }
-        };
-        for (rect, buf) in &deco.buttons {
-            mem(buf, *rect);
+        for (rect, (buf, px_size)) in &d.buttons {
+            deco.push((
+                buf.clone(),
+                *px_size,
+                Rectangle::new(frame_global.loc + rect.loc, rect.size),
+            ));
         }
-        if let Some(buf) = &deco.title {
-            mem(buf, layout.title);
+        if let Some((buf, px_size)) = &d.title {
+            deco.push((
+                buf.clone(),
+                *px_size,
+                Rectangle::new(frame_global.loc + layout.title.loc, layout.title.size),
+            ));
         }
     }
 
-    // Cadre
-    if layout.size != layout.client.size {
-        elements.push(Elem::Pixel(pixel(
-            &progs.frame,
-            Rectangle::new(frame_loc, layout.size),
-            vec![
-                Uniform::new("border_color", border_color.premultiplied()),
-                Uniform::new("title_color", title_bg.premultiplied()),
-                Uniform::new("radius_top", radius),
-                Uniform::new("radius_bottom", radius),
-                Uniform::new("border", layout.border as f32),
-                Uniform::new("title_height", layout.title_height as f32),
-                Uniform::new("px", px(scale)),
-            ],
-        )));
-    }
-
-    // Contenu de la fenêtre
+    // Contenu de la fenêtre: hors écran (coins arrondis, animations), sinon
+    // les surfaces du client directement
     let inner_radius = (radius - layout.border as f32).max(0.0);
-    if shaded {
-        view.offscreen = None;
-    } else if inner_radius > 0.0 {
+    let mut content = None;
+    let mut live = None;
+    if use_offscreen {
         match render_offscreen(renderer, view, scale) {
             Ok(()) => {
                 let off = view.offscreen.as_ref().unwrap();
-                let tex = TextureRenderElement::from_static_texture(
-                    off.id.clone(),
-                    renderer.context_id(),
-                    client_loc.to_f64().to_physical(scale),
-                    off.texture.clone(),
-                    1,
-                    Transform::Normal,
-                    None,
-                    None,
-                    Some(geo.size),
-                    None,
-                    Kind::Unspecified,
-                );
-                elements.push(Elem::Clipped(TextureShaderElement::new(
-                    tex,
-                    progs.clip.clone(),
-                    vec![
-                        Uniform::new("geo_size", (geo.size.w as f32, geo.size.h as f32)),
-                        Uniform::new("radius", inner_radius),
-                        Uniform::new("px", px(scale)),
-                    ],
-                )));
+                content = Some(Content {
+                    texture: off.texture.clone(),
+                    id: off.id.clone(),
+                    rect: Rectangle::new(view.loc, geo.size),
+                    radius: inner_radius,
+                });
             }
             Err(e) => {
-                warn!("rendu hors écran: {e}");
+                if geo.size.w > 0 && geo.size.h > 0 {
+                    warn!("rendu hors écran: {e}");
+                }
                 view.offscreen = None;
             }
         }
     } else {
         view.offscreen = None;
+    }
+    if content.is_none() && !shaded {
         let loc = (client_loc - geo.loc).to_physical_precise_round(scale);
-        elements.extend(render_elements_from_surface_tree(
+        live = Some(render_elements_from_surface_tree(
             renderer,
             &surface,
             loc,
             scale,
-            1.0,
+            alpha,
             Kind::Unspecified,
         ));
     }
-
-    // Ombre
-    if shadows && shadow_size > 0 && shadow_color.a > 0.0 {
-        let s = shadow_size;
-        let area = Rectangle::new(
-            frame_loc - Point::from((s, s)),
-            layout.size + Size::from((2 * s, 2 * s)),
-        );
-        elements.push(Elem::Pixel(pixel(
-            &progs.shadow,
-            area,
-            vec![
-                Uniform::new("shadow_color", shadow_color.premultiplied()),
-                Uniform::new(
-                    "shape",
-                    [s as f32, s as f32, layout.size.w as f32, layout.size.h as f32],
-                ),
-                Uniform::new("radius_top", radius),
-                Uniform::new("radius_bottom", radius),
-                Uniform::new("sigma", (s as f32 / 2.0).max(0.5)),
-                Uniform::new("px", px(scale)),
-            ],
-        )));
-    }
+    let snap = Snapshot {
+        frame: frame_global,
+        deco,
+        frame_params,
+        content,
+        shadow,
+    };
+    elements.extend(snapshot_elements(
+        &snap, renderer, progs, scale, output_loc, alpha, live,
+    ));
+    view.last = Some(snap);
     elements
+}
+
+impl State {
+    /// Fin d'une vue affichée (fermeture, réduction): sa dernière image
+    /// est animée
+    pub fn ghost_view(&mut self, i: usize, kind: GhostKind) {
+        let anim_kind = match kind {
+            GhostKind::Close => crate::anim::Kind::WindowClose,
+            GhostKind::Minimize(_) => crate::anim::Kind::Minimize,
+        };
+        let now = self.now();
+        let visible = self.visible(&self.views[i]);
+        let Some(snapshot) = self.views[i].last.take() else {
+            return;
+        };
+        if !visible {
+            return;
+        }
+        let Some(mut anim) = self.config.animations.start(anim_kind, now) else {
+            return;
+        };
+        // Interrompt une apparition: part de l'état affiché
+        if let Some((a, _)) = self.views[i].appear.take() {
+            anim = anim.resumed_from(1.0 - a.value(now).clamp(0.0, 1.0));
+        }
+        let window = matches!(kind, GhostKind::Minimize(_)).then(|| self.views[i].window.clone());
+        self.ghosts.push(Ghost {
+            snapshot,
+            anim,
+            kind,
+            window,
+        });
+    }
+
+    /// Point vers lequel une vue se réduit: le bas de son écran
+    pub fn minimize_point(&self, i: usize) -> Point<i32, Logical> {
+        let frame = self.frame_rect(i);
+        let center = frame.loc.to_f64() + frame.size.to_f64().to_point().downscale(2.0);
+        let screen = self
+            .output_at(center)
+            .map(|o| self.output_geometry(&o))
+            .unwrap_or(frame);
+        Point::from((center.x.round() as i32, screen.loc.y + screen.size.h))
+    }
+
+    /// Une vue apparaît (`Open`) ou est restaurée (`Restore`)
+    pub fn appear(&mut self, i: usize, kind: Appear) {
+        let now = self.now();
+        let anim_kind = match kind {
+            Appear::Open => crate::anim::Kind::WindowOpen,
+            Appear::Restore(_) => crate::anim::Kind::Minimize,
+        };
+        let Some(mut anim) = self.config.animations.start(anim_kind, now) else {
+            return;
+        };
+        // Restauration pendant la réduction: repart de l'état affiché
+        let window = self.views[i].window.clone();
+        if let Some(pos) = self
+            .ghosts
+            .iter()
+            .position(|g| g.window.as_ref() == Some(&window))
+        {
+            let g = self.ghosts.remove(pos);
+            anim = anim.resumed_from(1.0 - g.anim.value(now).clamp(0.0, 1.0));
+        }
+        self.views[i].appear = Some((anim, kind));
+    }
 }
 
 fn build_deco(

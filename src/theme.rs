@@ -217,6 +217,95 @@ pub struct Theme {
     pub inactive: WindowColors,
     /// Images des boutons: (normal, basculé)
     pub masks: HashMap<Button, (Mask, Mask)>,
+    pub menu: MenuTheme,
+}
+
+/// Apparence des menus (§ 6.3, § 10.4)
+#[derive(Debug, Clone)]
+pub struct MenuTheme {
+    pub border_width: i32,
+    pub border_color: Color,
+    pub bg: Color,
+    pub text: Color,
+    pub active_bg: Color,
+    pub active_text: Color,
+    pub disabled_text: Color,
+    pub active_disabled_text: Color,
+    pub separator_color: Color,
+    pub separator_width: i32,
+    pub separator_padding_width: i32,
+    pub separator_padding_height: i32,
+    pub title_bg: Color,
+    pub title_text: Color,
+    pub title_justify: Justify,
+    pub overlap_x: i32,
+    pub overlap_y: i32,
+    pub width_min: i32,
+    pub width_max: i32,
+    pub padding_x: i32,
+    pub padding_y: i32,
+    pub corner_radius: i32,
+    pub shadow_size: i32,
+    pub shadow_color: Color,
+}
+
+fn justify(v: Option<&str>) -> Justify {
+    match v.map(str::to_ascii_lowercase).as_deref() {
+        Some("left") => Justify::Left,
+        Some("right") => Justify::Right,
+        _ => Justify::Center,
+    }
+}
+
+fn menu_theme(rc: &ThemeRc, border_width: i32, active: &WindowColors) -> MenuTheme {
+    let bg = rc
+        .color("menu.items.bg.color")
+        .unwrap_or(Color::rgba(0.15, 0.15, 0.17, 1.0));
+    let text = rc
+        .color("menu.items.text.color")
+        .unwrap_or(Color::rgba(0.95, 0.95, 0.95, 1.0));
+    let active_bg = rc.color("menu.items.active.bg.color").unwrap_or(active.title_bg);
+    let active_text = rc
+        .color("menu.items.active.text.color")
+        .unwrap_or(active.label_text);
+    let disabled_text = rc
+        .color("menu.items.disabled.text.color")
+        .unwrap_or(Color::rgba(text.r, text.g, text.b, 0.45));
+    let title_bg = rc.color("menu.title.bg.color").unwrap_or(bg);
+    MenuTheme {
+        border_width: rc.int("menu.border.width").unwrap_or(border_width).max(0),
+        border_color: rc
+            .color("menu.border.color")
+            .or_else(|| rc.color("border.color"))
+            .unwrap_or(bg),
+        bg,
+        text,
+        active_bg,
+        active_text,
+        disabled_text,
+        active_disabled_text: rc
+            .color("menu.items.active.disabled.text.color")
+            .unwrap_or(disabled_text),
+        separator_color: rc.color("menu.separator.color").unwrap_or(disabled_text),
+        separator_width: rc.int("menu.separator.width").unwrap_or(1).max(0),
+        separator_padding_width: rc.int("menu.separator.padding.width").unwrap_or(6).max(0),
+        separator_padding_height: rc.int("menu.separator.padding.height").unwrap_or(3).max(0),
+        title_bg,
+        title_text: rc.color("menu.title.text.color").unwrap_or(text),
+        title_justify: justify(rc.get("menu.title.text.justify")),
+        overlap_x: rc.int("menu.overlap.x").unwrap_or(0),
+        overlap_y: rc.int("menu.overlap.y").unwrap_or(0),
+        width_min: rc.int("menu.width.min").unwrap_or(20).max(0),
+        width_max: rc.int("menu.width.max").unwrap_or(200).max(20),
+        padding_x: rc.int("menu.items.padding.x").unwrap_or(7).max(0),
+        padding_y: rc.int("menu.items.padding.y").unwrap_or(4).max(0),
+        corner_radius: rc.int("menu.corner.radius").unwrap_or(6).max(0),
+        shadow_size: rc
+            .int("menu.shadow.size")
+            .unwrap_or(active.shadow_size.min(24))
+            .max(0),
+        shadow_color: rc.color("menu.shadow.color").unwrap_or(active.shadow_color),
+    }
 }
 
 /// Dossiers où chercher un thème, par ordre de priorité
@@ -326,15 +415,7 @@ impl Theme {
     }
 
     pub fn from_rc(name: &str, rc: &ThemeRc, dir: Option<&Path>) -> Theme {
-        let justify = match rc
-            .get("window.label.text.justify")
-            .map(str::to_ascii_lowercase)
-            .as_deref()
-        {
-            Some("left") => Justify::Left,
-            Some("right") => Justify::Right,
-            _ => Justify::Center,
-        };
+        let justify = justify(rc.get("window.label.text.justify"));
         let mut masks = HashMap::new();
         for b in [
             Button::Iconify,
@@ -357,15 +438,19 @@ impl Theme {
                 ),
             );
         }
+        let border_width = rc.int("border.width").unwrap_or(1).max(0);
+        let active = colors(rc, "active", Color::rgba(0.0, 0.0, 0.0, 0.6));
+        let menu = menu_theme(rc, border_width, &active);
         Theme {
             name: name.to_string(),
-            border_width: rc.int("border.width").unwrap_or(1).max(0),
+            border_width,
             padding_width: rc.int("padding.width").unwrap_or(4).max(0),
             padding_height: rc.int("padding.height").unwrap_or(4).max(0),
             justify,
-            active: colors(rc, "active", Color::rgba(0.0, 0.0, 0.0, 0.6)),
+            active,
             inactive: colors(rc, "inactive", Color::rgba(0.0, 0.0, 0.0, 0.4)),
             masks,
+            menu,
         }
     }
 }

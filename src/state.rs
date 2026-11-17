@@ -134,6 +134,21 @@ pub struct State {
     pub child_env: Vec<(String, String)>,
     /// Variables du fichier `environment`
     pub env_vars: Vec<(String, String)>,
+
+    /// Menus de `menu.xml` (§ 5.5), menus ouverts, menus qui disparaissent
+    pub menus: crate::menu::Menus,
+    pub menu: Option<crate::menu::ui::MenuState>,
+    pub menu_ghosts: Vec<crate::menu::ui::MenuGhost>,
+    pub icons: crate::icons::Icons,
+    /// Résultats des pipemenus (jeton, sortie)
+    pub pipe_tx: smithay::reexports::calloop::channel::Sender<(u64, Option<String>)>,
+    pub pipe_counter: u64,
+    /// Horloge des animations (§ 10.5)
+    pub clock: crate::anim::Clock,
+    /// `--no-animations`
+    pub no_animations: bool,
+    /// Vues fermées ou réduites, encore animées
+    pub ghosts: Vec<crate::render::Ghost>,
 }
 
 #[derive(Default)]
@@ -199,7 +214,21 @@ impl State {
             .expect("source de l'affichage");
         info!("socket Wayland: {}", socket_name.to_string_lossy());
 
+        let (pipe_tx, pipe_rx) = smithay::reexports::calloop::channel::channel();
+        handle
+            .insert_source(pipe_rx, |event, _, state: &mut State| {
+                if let smithay::reexports::calloop::channel::Event::Msg((token, out)) = event {
+                    state.pipe_done(token, out);
+                }
+            })
+            .expect("source des pipemenus");
         let theme = Theme::load(&config);
+        let menus = crate::menu::Menus::load(&config.dir).unwrap_or_else(|e| {
+            warn!("{e}");
+            crate::menu::Menus::fallback()
+        });
+        let mut icons = crate::icons::Icons::default();
+        icons.set_theme(&config.icon_theme);
         let child_env = vec![
             (
                 "WAYLAND_DISPLAY".into(),
@@ -249,11 +278,36 @@ impl State {
             scroll_acc: (0.0, 0.0),
             child_env,
             env_vars: vec![],
+            menus,
+            menu: None,
+            menu_ghosts: vec![],
+            icons,
+            pipe_tx,
+            pipe_counter: 0,
+            clock: crate::anim::Clock::default(),
+            no_animations: false,
+            ghosts: vec![],
         }
+    }
+
+    /// Instant présent de l'horloge des animations
+    pub fn now(&self) -> std::time::Duration {
+        self.clock.now(self.start)
     }
 
     /// Lance `sh -c commande`, détachée, avec l'environnement de la session
     pub fn spawn(&self, command: &str) {
+        let mut cmd = self.command(command);
+        match cmd.spawn() {
+            Ok(mut child) => {
+                std::thread::spawn(move || child.wait());
+            }
+            Err(e) => warn!("lancement de « {command} »: {e}"),
+        }
+    }
+
+    /// Commande `sh -c …` avec l'environnement de la session
+    pub fn command(&self, command: &str) -> std::process::Command {
         let mut cmd = std::process::Command::new("sh");
         cmd.arg("-c").arg(command).stdin(std::process::Stdio::null());
         cmd.env_remove("WAYLAND_SOCKET");
@@ -271,12 +325,7 @@ impl State {
         for (k, v) in &self.child_env {
             cmd.env(k, v);
         }
-        match cmd.spawn() {
-            Ok(mut child) => {
-                std::thread::spawn(move || child.wait());
-            }
-            Err(e) => warn!("lancement de « {command} »: {e}"),
-        }
+        cmd
     }
 
     pub fn output_location(&self, output: &Output) -> Point<i32, Logical> {

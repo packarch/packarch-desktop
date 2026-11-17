@@ -1,0 +1,127 @@
+# Version 0.3: menus (menu.xml, sous-menus, pipemenus, menu de fenêtre,
+# liste des fenêtres, clavier) et animations (horloge simulée).
+# Lancé par tests/capture.sh avec le rc.xml et le menu.xml de Packarch.
+wait 1000
+spawn kitty --config NONE -o confirm_os_window_close=0 -T un -e sh -c 'echo Un; sleep 120'
+wait-views 1 8000
+wait 600
+# --- Menu racine: clic droit sur le bureau (la relâche sans mouvement ne
+# choisit rien)
+move 60 700
+press right
+release right
+expect-menu root-menu
+wait 250
+capture 01-menu-racine.png
+# Sous-menu au survol, après 100 ms
+point-menu Préférences
+wait 300
+expect-menu root-menu preferences
+capture 02-sous-menu.png
+# Pipemenu au survol: ouvert à l'arrivée du résultat
+point-menu Changer de style
+wait-menu 3 6000
+wait 250
+capture 03-pipemenu.png
+# Clavier: Gauche ferme le dernier niveau, Échap ferme tout
+key 105
+expect-menu root-menu preferences
+key 1
+expect-menu none
+# --- Menu de fenêtre au clavier (A-space), sous la barre de titre
+combo 56 57
+expect-menu client-menu
+wait 250
+capture 04-menu-fenetre.png
+# Lettre d'accélérateur « e »: Enrouler
+key 18
+expect-menu none
+expect-shaded un yes
+combo 56 57
+key 18
+expect-shaded un no
+# Flèches et Entrée: Bas ×3 depuis rien = Maximiser (Bureaux, Réduire, Maximiser)
+combo 56 57
+key 108
+key 108
+key 108
+key 28
+wait 300
+expect un 0 38 1280 724
+combo 56 57
+key 108
+key 108
+key 108
+key 28
+wait 300
+# --- Menu de fenêtre à la souris: clic droit sur le titre, puis Bureaux > 2
+point un title
+click right
+expect-menu client-menu
+point-menu Bureaux
+click left
+expect-menu client-menu client-menu/desktops
+point-menu 2
+click left
+expect-menu none
+expect-desktop 1
+expect-visible un no
+# --- Liste des fenêtres (clic milieu sur le bureau): « un » sur le bureau 2
+move 60 700
+press middle
+release middle
+expect-menu client-list-combined-menu
+wait 250
+capture 05-liste-fenetres.png
+point-menu un
+click left
+expect-menu none
+expect-desktop 2
+expect-focus un
+# --- Super+Espace ouvre le menu racine, un second appui le referme
+combo 125 57
+expect-menu root-menu
+combo 125 57
+expect-menu none
+# --- Clic hors du menu: fermé, sans rien transmettre
+combo 125 57
+expect-menu root-menu
+move 1250 790
+click left
+expect-menu none
+expect-focus un
+# --- Animations à l'horloge simulée
+clock-freeze
+combo 125 57
+clock-advance 50
+wait 100
+capture 06-menu-mi-ouverture.png
+key 1
+clock-advance 50
+wait 100
+capture 07-menu-mi-fermeture.png
+# Réduction (A-F5) à mi-parcours, puis restauration (A-Tab)
+combo 56 63
+expect-visible un no
+clock-advance 90
+wait 100
+capture 08-reduction-mi-parcours.png
+clock-advance 200
+combo 56 15
+expect-visible un yes
+clock-advance 80
+wait 100
+capture 09-restauration-mi-parcours.png
+clock-run
+wait 300
+# Fermeture (A-F4) à mi-parcours
+clock-freeze
+combo 56 62
+wait 400
+clock-advance 70
+wait 100
+capture 10-fermeture-mi-parcours.png
+clock-run
+wait 300
+capture 11-fin.png
+quit

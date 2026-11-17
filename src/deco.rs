@@ -232,6 +232,14 @@ impl Text {
         buffer.layout_runs().map(|r| r.line_w).fold(0.0, f32::max)
     }
 
+    /// Largeur d'un texte, en pixels à l'échelle `scale`
+    pub fn measure(&mut self, text: &str, font: &Font, scale: f64) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        Text::width(&self.buffer(text, font, scale))
+    }
+
     /// Titre dans une image de `width` × `height` pixels physiques, aligné
     /// et tronqué avec « … »
     pub fn title(

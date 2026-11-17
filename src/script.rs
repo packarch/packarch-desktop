@@ -27,6 +27,12 @@
 //! expect-moved un 50 -20 vérifie son déplacement depuis `mark`
 //! expect-shaded un yes   vérifie l'enroulement (yes/no)
 //! expect-visible un no   vérifie l'affichage (réduite, autre bureau…)
+//! expect-menu root-menu prefs   vérifie les menus ouverts (none: aucun)
+//! wait-menu 2 5000       attend 2 menus ouverts (pipemenus, 5 s au plus)
+//! point-menu Terminal    pointeur sur l'entrée de ce libellé
+//! clock-freeze           arrête l'horloge des animations
+//! clock-advance 50       l'avance de 50 ms
+//! clock-run              la remet en marche
 //! capture /tmp/a.png     capture de l'écran (backend headless)
 //! quit
 //! ```
@@ -65,6 +71,12 @@ pub enum Step {
     ExpectMoved(String, i32, i32),
     ExpectShaded(String, bool),
     ExpectVisible(String, bool),
+    ExpectMenu(Vec<String>),
+    WaitMenu(usize, u64),
+    PointMenu(String),
+    ClockFreeze,
+    ClockAdvance(u64),
+    ClockRun,
     Capture(PathBuf),
     Quit,
 }
@@ -164,6 +176,19 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                         .collect::<Result<_, _>>()?;
                     Step::Expect(v[..n - 4].join(" "), [nums[0], nums[1], nums[2], nums[3]])
                 }
+                "expect-menu" => Step::ExpectMenu(match rest {
+                    "none" | "" => vec![],
+                    _ => rest.split_whitespace().map(str::to_string).collect(),
+                }),
+                "wait-menu" => {
+                    let n = num(args.next())? as usize;
+                    let t = args.next().map(|s| s.parse().unwrap_or(5000)).unwrap_or(5000);
+                    Step::WaitMenu(n, t)
+                }
+                "point-menu" => Step::PointMenu(rest.to_string()),
+                "clock-freeze" => Step::ClockFreeze,
+                "clock-advance" => Step::ClockAdvance(num(args.next())? as u64),
+                "clock-run" => Step::ClockRun,
                 "capture" => Step::Capture(PathBuf::from(rest)),
                 "quit" => Step::Quit,
                 _ => return Err(format!("commande inconnue: {cmd}")),
@@ -365,6 +390,36 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                         }
                         None => fail(state, format!("pas de vue « {title} »")),
                     }
+                }
+                Step::ExpectMenu(ids) => {
+                    let got = state.open_menu_ids();
+                    if got != ids {
+                        fail(state, format!("menus ouverts {got:?} au lieu de {ids:?}"));
+                    }
+                }
+                Step::WaitMenu(n, timeout) => {
+                    let start = *waiting_since.get_or_insert_with(Instant::now);
+                    let open = state.open_menu_ids().len();
+                    if open < n && start.elapsed() < Duration::from_millis(timeout) {
+                        return TimeoutAction::ToDuration(Duration::from_millis(20));
+                    }
+                    if open < n {
+                        fail(state, format!("{open} menus ouverts sur {n} après {timeout} ms"));
+                    }
+                    waiting_since = None;
+                }
+                Step::PointMenu(label) => match state.menu_item_center(&label) {
+                    Some(p) => state.pointer_motion(p, state.start.elapsed().as_millis() as u32),
+                    None => fail(state, format!("pas d'entrée « {label} » dans les menus ouverts")),
+                },
+                Step::ClockFreeze => state.clock.frozen = Some(state.now()),
+                Step::ClockAdvance(ms) => {
+                    let now = state.now();
+                    state.clock.frozen = Some(now + Duration::from_millis(ms));
+                }
+                Step::ClockRun => {
+                    let start = state.start;
+                    state.clock.run(start);
                 }
                 Step::Capture(path) => match state.backend.as_mut() {
                     Some(Backend::Headless(h)) => {

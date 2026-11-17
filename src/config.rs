@@ -230,6 +230,7 @@ pub struct Config {
     pub input_devices: Vec<InputDevice>,
     pub window_rules: Vec<WindowRule>,
     pub menu_show_icons: bool,
+    pub animations: crate::anim::Animations,
     /// Éléments ignorés ou invalides, avec leur ligne
     pub warnings: Vec<String>,
 }
@@ -332,6 +333,7 @@ impl Default for Config {
             input_devices: vec![],
             window_rules: vec![],
             menu_show_icons: true,
+            animations: crate::anim::Animations::default(),
             warnings: vec![],
         };
         c.parse_defaults();
@@ -637,6 +639,7 @@ impl Config {
                 "mouse" => self.parse_mouse(&mut r, section),
                 "libinput" => self.parse_libinput(&mut r, section),
                 "windowrules" => self.parse_rules(&mut r, section),
+                "animations" => self.parse_animations(&mut r, section),
                 "menu" => {
                     for c in elements(section) {
                         match name(c).as_str() {
@@ -928,6 +931,52 @@ impl Config {
         }
     }
 
+    /// `<animations enabled="yes" speed="1.0">` et un élément par animation
+    /// (`<window-open duration="160" curve="spring" stiffness="600"
+    /// damping="40"/>`, `<menu enabled="no"/>`) (§ 10.5)
+    fn parse_animations(&mut self, r: &mut Reader, section: roxmltree::Node) {
+        use crate::anim::{Curve, Kind};
+        let a = &mut self.animations;
+        r.attr_bool(section, "enabled", &mut a.enabled);
+        if let Some(v) = section.attribute("speed") {
+            match v.trim().parse::<f64>() {
+                Ok(s) if s >= 0.0 => a.speed = s,
+                _ => r.warn(section, format!("speed: nombre positif attendu, pas « {v} »")),
+            }
+        }
+        for c in elements(section) {
+            let Some(kind) = Kind::parse(c.tag_name().name()) else {
+                r.unknown(c, "animations");
+                continue;
+            };
+            let mut s = *a.setting_mut(kind);
+            r.attr_bool(c, "enabled", &mut s.enabled);
+            if let Some(v) = c.attribute("duration") {
+                match v.trim().parse::<u32>() {
+                    Ok(ms) => s.duration_ms = ms.min(5000),
+                    Err(_) => r.warn(c, format!("duration: millisecondes attendues, pas « {v} »")),
+                }
+            }
+            if let Some(v) = c.attribute("curve") {
+                match Curve::parse(v) {
+                    Some(curve) => s.curve = curve,
+                    None => r.warn(c, format!("courbe inconnue: {v}")),
+                }
+            }
+            if let Curve::Spring { stiffness, damping } = &mut s.curve {
+                for (attr, target) in [("stiffness", stiffness), ("damping", damping)] {
+                    if let Some(v) = c.attribute(attr) {
+                        match v.trim().parse::<f64>() {
+                            Ok(x) if x > 0.0 => *target = x,
+                            _ => r.warn(c, format!("{attr}: nombre positif attendu")),
+                        }
+                    }
+                }
+            }
+            *a.setting_mut(kind) = s;
+        }
+    }
+
     pub fn region(&self, name: &str) -> Option<&Region> {
         self.regions.iter().find(|r| r.name == name)
     }
@@ -1022,6 +1071,30 @@ mod tests {
         assert_eq!((c.snap_inner, c.snap_outer, c.top_maximize), (5, 15, false));
         assert!(c.window_rules[0].matches("yad", "Thèmes Packarch"));
         assert!(!c.window_rules[0].matches("kitty", "Thèmes Packarch"));
+    }
+
+    #[test]
+    fn animations() {
+        use crate::anim::{Curve, Kind};
+        let mut c = Config::default();
+        c.parse(
+            r#"<packarch_config><animations enabled="yes" speed="0.5">
+            <window-open duration="200" curve="linear"/>
+            <workspace-switch curve="spring" stiffness="300"/>
+            <menu enabled="no"/><vole/>
+            </animations></packarch_config>"#,
+        )
+        .unwrap();
+        assert_eq!(c.warnings.len(), 1, "{:?}", c.warnings);
+        let a = &mut c.animations;
+        assert_eq!(a.speed, 0.5);
+        assert_eq!(a.setting_mut(Kind::WindowOpen).duration_ms, 200);
+        assert_eq!(a.setting_mut(Kind::WindowOpen).curve, Curve::Linear);
+        assert!(matches!(
+            a.setting_mut(Kind::WorkspaceSwitch).curve,
+            Curve::Spring { stiffness, .. } if stiffness == 300.0
+        ));
+        assert!(!a.setting_mut(Kind::Menu).enabled);
     }
 
     #[test]

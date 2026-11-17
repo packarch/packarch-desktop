@@ -7,9 +7,10 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
+use crate::anim::Anim;
 use crate::config::Button;
 use crate::deco::{Edges, Frame};
-use crate::render::{DecoCache, WindowTexture};
+use crate::render::{Appear, DecoCache, Snapshot, WindowTexture};
 
 /// Redimensionnement en cours: la position suit les bords de gauche et du
 /// haut quand la taille change
@@ -81,6 +82,10 @@ pub struct View {
     pub pressed: Option<Button>,
     pub offscreen: Option<WindowTexture>,
     pub deco: Option<DecoCache>,
+    /// Dernière image affichée (animations de fermeture et de réduction)
+    pub last: Option<Snapshot>,
+    /// Animation d'apparition en cours
+    pub appear: Option<(Anim, Appear)>,
 }
 
 impl View {
@@ -103,6 +108,8 @@ impl View {
             pressed: None,
             offscreen: None,
             deco: None,
+            last: None,
+            appear: None,
         }
     }
 

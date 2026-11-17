@@ -626,7 +626,11 @@ partant de l'état affiché.
   ```
 
   `speed` multiplie toutes les durées (0,5 = deux fois plus rapide) ;
-  `enabled="no"` ou `--no-animations` désactive tout.
+  `enabled="no"` ou `--no-animations` désactive tout. Éléments, dans l'ordre
+  du tableau : `window-open`, `window-close`, `minimize`, `maximize`,
+  `menu`, `osd`, `workspace-switch`, `snap-preview`, `shade` ; attributs
+  `enabled`, `duration`, `curve`, et pour `spring` : `stiffness` (600 par
+  défaut) et `damping` (40).
 - Désactivées automatiquement avec le backend pixman (pas de GPU) et en
   plein écran direct ; les ombres et coins suivent l'animation.
 - Horloge : celle des rafraîchissements d'écran (presentation feedback),
@@ -730,5 +734,9 @@ Décidé le 17 novembre 2026 :
 
 4. Racine de `rc.xml` : `<packarch_config>` dans les fichiers de Packarch ;
    `<openbox_config>` et `<labwc_config>` acceptées en lecture (§ 5.2).
+5. Sous-menus : `menu.overlap.x` positif les fait chevaucher leur parent,
+   négatif laisse un espace ; `menu.overlap.y` les décale vers le bas.
+   Valeurs par défaut des clés de menu absentes du thème : bordure
+   `border.width`, marges 7 × 4 px, largeur 20 à 200 px, rayon 6 px.
 
 Aucune question ouverte pour l'instant.

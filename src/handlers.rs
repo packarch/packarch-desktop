@@ -126,6 +126,7 @@ impl State {
             }
             self.place_new(i);
             let i = self.focus_view(i, true);
+            self.appear(i, crate::render::Appear::Open);
             info!(
                 "fenêtre: « {} » ({})",
                 self.views[i].title(),
@@ -135,7 +136,8 @@ impl State {
             return;
         }
         if !has_buffer && view.mapped {
-            view.mapped = false;
+            self.ghost_view(i, crate::render::GhostKind::Close);
+            self.views[i].mapped = false;
             self.focus_top();
             return;
         }
@@ -352,6 +354,9 @@ impl XdgShellHandler for State {
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(i) = self.view_of(&surface) {
+            if self.views[i].mapped {
+                self.ghost_view(i, crate::render::GhostKind::Close);
+            }
             let view = self.views.remove(i);
             self.mru.retain(|w| *w != view.window);
             if let Some(c) = self.cycle.as_mut() {

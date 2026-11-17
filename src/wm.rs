@@ -264,7 +264,11 @@ impl State {
     pub fn focus_view(&mut self, i: usize, raise: bool) -> usize {
         self.show_desktop = false;
         let mut i = i;
-        self.views[i].minimized = false;
+        if self.views[i].minimized {
+            self.views[i].minimized = false;
+            let to = self.minimize_point(i);
+            self.appear(i, crate::render::Appear::Restore(to));
+        }
         if !self.views[i].on_desktop(self.desktop) {
             let d = self.views[i].desktop;
             self.switch_desktop(d);
@@ -497,6 +501,11 @@ impl State {
     }
 
     pub fn iconify(&mut self, i: usize) {
+        if self.views[i].minimized {
+            return;
+        }
+        let to = self.minimize_point(i);
+        self.ghost_view(i, crate::render::GhostKind::Minimize(to));
         self.views[i].minimized = true;
         if self.focused_view() == Some(i) {
             self.focus_top();
@@ -622,7 +631,7 @@ impl State {
         use Action::*;
         match action {
             Execute(cmd) => self.spawn(cmd),
-            ShowMenu { menu, .. } => info!("menu « {menu} »: les menus arrivent en 0.3"),
+            ShowMenu { menu, at_cursor } => self.show_menu(menu, *at_cursor, i),
             Reconfigure => self.reconfigure(),
             Exit => self.exit(),
             GoToDesktop { to, wrap } => {
@@ -873,7 +882,12 @@ impl State {
                 return;
             }
         }
+        if self.no_animations {
+            self.config.animations.enabled = false;
+        }
         self.theme = Theme::load(&self.config);
+        self.close_menus();
+        self.reload_menus();
         for v in &mut self.views {
             v.deco = None;
         }

@@ -8,13 +8,16 @@
 )]
 
 mod actions;
+mod anim;
 mod backend;
 mod bindings;
 mod config;
 mod deco;
 mod env;
 mod handlers;
+mod icons;
 mod input;
+mod menu;
 mod render;
 mod script;
 mod session;
@@ -67,6 +70,9 @@ struct Cli {
     /// Échelle de l'écran
     #[arg(long, hide = true, default_value_t = 1.0)]
     scale: f64,
+    /// Désactive les animations
+    #[arg(long)]
+    no_animations: bool,
     /// Scénario d'essai (voir src/script.rs)
     #[arg(long, hide = true, value_name = "FICHIER")]
     script: Option<PathBuf>,
@@ -117,6 +123,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
     let mut state = State::new(display, event_loop.handle(), event_loop.get_signal(), config);
+    if cli.no_animations {
+        state.no_animations = true;
+        state.config.animations.enabled = false;
+    }
 
     match cli.backend {
         BackendKind::Winit => backend::winit::init(&mut event_loop, &mut state, cli.scale)?,
