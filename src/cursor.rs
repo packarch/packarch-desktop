@@ -71,7 +71,7 @@ impl Cursors {
                 .map(|i| Image {
                     buffer: MemoryRenderBuffer::from_slice(
                         &premultiply(&i.pixels_rgba),
-                        Fourcc::Abgr8888,
+                        Fourcc::Argb8888,
                         (i.width as i32, i.height as i32),
                         1,
                         Transform::Normal,
@@ -87,6 +87,9 @@ impl Cursors {
     }
 }
 
+/// RVBA en ARGB8888 prémultiplié (octets B, V, R, A en mémoire): le format
+/// du plan curseur, que le compositeur DRM copie alors tel quel sans le
+/// dessiner dans l'image (un seul curseur sous QEMU/SPICE)
 fn premultiply(rgba: &[u8]) -> Vec<u8> {
     rgba.as_chunks::<4>()
         .0
@@ -94,7 +97,7 @@ fn premultiply(rgba: &[u8]) -> Vec<u8> {
         .flat_map(|p| {
             let a = p[3] as u32;
             let m = |c: u8| ((c as u32 * a + 127) / 255) as u8;
-            [m(p[0]), m(p[1]), m(p[2]), p[3]]
+            [m(p[2]), m(p[1]), m(p[0]), p[3]]
         })
         .collect()
 }
@@ -114,7 +117,7 @@ fn fallback(px: u32) -> Image {
         }
     }
     Image {
-        buffer: MemoryRenderBuffer::from_slice(&data, Fourcc::Abgr8888, (s, s), 1, Transform::Normal, None),
+        buffer: MemoryRenderBuffer::from_slice(&data, Fourcc::Argb8888, (s, s), 1, Transform::Normal, None),
         size: Size::from((s, s)),
         hotspot: Point::from((0, 0)),
     }

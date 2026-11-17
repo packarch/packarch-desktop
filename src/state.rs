@@ -179,6 +179,8 @@ pub struct State {
     /// Bus D-Bus propre à la session (adresse, processus), quand une autre
     /// session est active
     pub private_bus: Option<(String, i32)>,
+    /// Surfaces qui ont demandé le cadre du compositeur par la décoration KDE
+    pub kde_ssd: Vec<WlSurface>,
     /// Dernière zone utile connue de chaque écran (barres)
     pub zones: std::collections::HashMap<String, Rectangle<i32, Logical>>,
     /// Raccourcis désactivés (ToggleKeybinds), sauf celui qui les rétablit
@@ -355,6 +357,7 @@ impl State {
             keybinds_off: false,
             private_bus: None,
             zones: std::collections::HashMap::new(),
+            kde_ssd: vec![],
         }
     }
 

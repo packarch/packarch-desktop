@@ -403,12 +403,18 @@ impl XdgShellHandler for State {
         &mut self.xdg_shell_state
     }
 
+    /// Le cadre du compositeur n'est dessiné que si le client le demande
+    /// (xdg-decoration, ou décoration KDE des applications GTK3) : sans
+    /// l'un ni l'autre, il dessine le sien (GTK4, libadwaita…)
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        self.views.push(View::new(
+        let mut view = View::new(
             Window::new_wayland_window(surface.clone()),
             surface.wl_surface().clone(),
             self.desktop,
-        ));
+        );
+        self.kde_ssd.retain(|s| s.is_alive());
+        view.decorated = self.kde_ssd.contains(surface.wl_surface());
+        self.views.push(view);
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -573,7 +579,15 @@ delegate_xdg_shell!(State);
 
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        toplevel.with_pending_state(|s| s.decoration_mode = Some(DecoMode::ServerSide));
+        let mode = if self.config.server_decoration {
+            DecoMode::ServerSide
+        } else {
+            DecoMode::ClientSide
+        };
+        if let Some(i) = self.view_of(&toplevel) {
+            self.views[i].decorated = mode == DecoMode::ServerSide;
+        }
+        toplevel.with_pending_state(|s| s.decoration_mode = Some(mode));
     }
 
     /// `core/decoration` à `server`: le cadre du compositeur, toujours;
@@ -601,6 +615,45 @@ impl XdgDecorationHandler for State {
 impl KdeDecorationHandler for State {
     fn kde_decoration_state(&self) -> &KdeDecorationState {
         &self.kde_decoration_state
+    }
+
+    /// GTK3: décoration par le serveur (mode par défaut), souvent annoncée
+    /// avant le rôle de fenêtre
+    fn new_decoration(
+        &mut self,
+        surface: &WlSurface,
+        _decoration: &smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::OrgKdeKwinServerDecoration,
+    ) {
+        self.set_kde_ssd(surface, true);
+    }
+
+    fn request_mode(
+        &mut self,
+        surface: &WlSurface,
+        decoration: &smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::OrgKdeKwinServerDecoration,
+        mode: smithay::reexports::wayland_server::WEnum<
+            smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode,
+        >,
+    ) {
+        use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode;
+        if let smithay::reexports::wayland_server::WEnum::Value(m) = mode {
+            let server = m == Mode::Server || self.config.server_decoration;
+            let m = if server { Mode::Server } else { m };
+            self.set_kde_ssd(surface, server);
+            decoration.mode(m);
+        }
+    }
+}
+
+impl State {
+    fn set_kde_ssd(&mut self, surface: &WlSurface, server: bool) {
+        self.kde_ssd.retain(|s| s.is_alive() && s != surface);
+        if server {
+            self.kde_ssd.push(surface.clone());
+        }
+        if let Some(i) = self.view_index(surface) {
+            self.views[i].decorated = server;
+        }
     }
 }
 
