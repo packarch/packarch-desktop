@@ -3,7 +3,7 @@
 //! placement, maximisation, collage, bureaux, et exécution des actions.
 
 use smithay::desktop::Window;
-use smithay::input::pointer::{Focus, GrabStartData};
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus, GrabStartData};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size};
@@ -811,6 +811,7 @@ impl State {
             button: origin.button.unwrap_or(BTN_LEFT),
             location: origin.location,
         };
+        self.cursor_status = CursorImageStatus::Named(CursorIcon::Move);
         let grab = MoveGrab {
             start,
             window: self.views[i].window.clone(),
@@ -827,15 +828,36 @@ impl State {
         if self.views[i].tiling != Tiling::None {
             return;
         }
-        let frame = self.frame_rect(i).to_f64();
-        let p = origin.location;
-        let edges = Edges {
-            left: p.x < frame.loc.x + frame.size.w / 2.0,
-            right: p.x >= frame.loc.x + frame.size.w / 2.0,
-            top: p.y < frame.loc.y + frame.size.h / 2.0,
-            bottom: p.y >= frame.loc.y + frame.size.h / 2.0,
-        };
+        let edges = self.resize_edges(i, origin.location);
         self.start_resize_edges(i, edges, origin);
+    }
+
+    /// Bords à déplacer pour un redimensionnement depuis `p`: ceux du bord
+    /// ou du coin attrapé; ailleurs (Super+clic droit), selon le tiers de la
+    /// vue où se trouve le pointeur (au centre: le coin le plus proche)
+    pub fn resize_edges(&self, i: usize, p: Point<f64, Logical>) -> Edges {
+        let layout = self.layout(&self.views[i]);
+        let frame = self.frame_rect(i).to_f64();
+        if let Some(crate::deco::Part::Border(e)) = layout.part_at(p - frame.loc) {
+            return e;
+        }
+        let (rx, ry) = (
+            (p.x - frame.loc.x) / frame.size.w.max(1.0),
+            (p.y - frame.loc.y) / frame.size.h.max(1.0),
+        );
+        let mut e = Edges {
+            left: rx < 1.0 / 3.0,
+            right: rx > 2.0 / 3.0,
+            top: ry < 1.0 / 3.0,
+            bottom: ry > 2.0 / 3.0,
+        };
+        if !(e.left || e.right || e.top || e.bottom) {
+            e.left = rx < 0.5;
+            e.right = !e.left;
+            e.top = ry < 0.5;
+            e.bottom = !e.top;
+        }
+        e
     }
 
     pub fn start_resize_edges(&mut self, i: usize, edges: Edges, origin: Origin) {
@@ -851,9 +873,12 @@ impl State {
             edges,
             initial_loc: view.loc,
             initial_size: size,
-            ending: false,
+            last_serial: None,
+            ending: None,
         });
         let toplevel = view.window.toplevel().unwrap().clone();
+        self.cursor_status = CursorImageStatus::Named(crate::input::resize_cursor(edges));
+        let view = &mut self.views[i];
         toplevel.with_pending_state(|s| s.states.set(xdg_toplevel::State::Resizing));
         toplevel.send_pending_configure();
         let start = GrabStartData {
@@ -900,6 +925,7 @@ impl State {
 
     /// Recharge la configuration (§ 5.7); une erreur garde l'ancienne
     pub fn reconfigure(&mut self) {
+        self.request_redraw();
         let dir = self.config.dir.clone();
         match Config::load(&dir) {
             Ok(config) => {

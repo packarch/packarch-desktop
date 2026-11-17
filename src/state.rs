@@ -231,6 +231,8 @@ impl State {
                     unsafe {
                         display.get_mut().dispatch_clients(state).unwrap();
                     }
+                    // Une requête d'un client peut changer l'image
+                    state.request_redraw();
                     Ok(PostAction::Continue)
                 },
             )

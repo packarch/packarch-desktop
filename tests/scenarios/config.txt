@@ -122,4 +122,45 @@ point un close
 click left
 wait 1000
 capture 23-fin.png
+# Redimensionnement par les bords: seul le bord attrapé bouge (§ 8.7)
+spawn kitty --config NONE -o confirm_os_window_close=0 -o remember_window_size=no -o initial_window_width=500 -o initial_window_height=300 -T bords -e sh -c 'sleep 120'
+wait-views 3 8000
+wait 800
+# Centrée (W-Down: AutoPlace center), loin des barres
+combo 125 108
+wait 300
+mark bords
+point bords right
+press left
+move-by 20 0
+move-by 30 0
+release left
+wait 400
+expect-grown bords 50 0
+expect-moved bords 0 0
+mark bords
+point bords left
+press left
+move-by -20 0
+move-by -20 0
+release left
+wait 400
+expect-grown bords 40 0
+expect-moved bords -40 0
+mark bords
+point bords bottom
+press left
+move-by 0 30
+release left
+wait 400
+expect-grown bords 0 30
+expect-moved bords 0 0
+mark bords
+point bords top
+press left
+move-by 0 -25
+release left
+wait 400
+expect-grown bords 0 25
+expect-moved bords 0 -25
 quit

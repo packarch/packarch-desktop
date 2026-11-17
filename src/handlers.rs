@@ -151,8 +151,19 @@ impl State {
             if r.edges.top {
                 view.loc.y = r.initial_loc.y + (r.initial_size.h - size.h);
             }
-            if r.ending {
-                view.resize = None;
+            // Fini quand le client a appliqué la dernière configuration
+            if let Some(last) = r.ending {
+                let acked = with_states(surface, |s| {
+                    s.data_map
+                        .get::<XdgToplevelSurfaceData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .current_serial
+                });
+                if last.is_none_or(|l| acked.is_some_and(|a| a >= l)) {
+                    view.resize = None;
+                }
             }
         }
     }

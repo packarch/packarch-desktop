@@ -357,6 +357,7 @@ impl State {
 
     /// Résultat d'un pipemenu
     pub fn pipe_done(&mut self, token: u64, out: Option<String>) {
+        self.request_redraw();
         let Some(ms) = self.menu.as_mut() else { return };
         let Some(p) = ms.pending.take_if(|p| p.token == token) else {
             return;
@@ -469,6 +470,7 @@ impl State {
     }
 
     fn menu_hover_commit(&mut self, generation: u64, l: usize, j: usize) {
+        self.request_redraw();
         let Some(ms) = self.menu.as_mut() else { return };
         if ms.hover_gen != generation || ms.levels.get(l).is_none_or(|lv| lv.selected != Some(j)) {
             return;

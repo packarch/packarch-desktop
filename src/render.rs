@@ -1089,6 +1089,24 @@ fn view_elements(
 }
 
 impl State {
+    /// Une animation est en cours: l'écran doit être redessiné à chaque image
+    pub fn animating(&self) -> bool {
+        let now = self.now();
+        self.ghosts.iter().any(|g| !g.anim.done(now))
+            || self.views.iter().any(|v| v.appear.is_some())
+            || self.desk_anim.is_some()
+            || self.menu_ghosts.iter().any(|g| !g.anim.done(now))
+            || self
+                .menu
+                .as_ref()
+                .is_some_and(|m| m.levels.iter().any(|l| l.anim.is_some()))
+            || self
+                .osd
+                .as_ref()
+                .is_some_and(|o| o.anim.is_some() || o.hide_at.is_some())
+            || self.osd_ghost.is_some()
+    }
+
     /// Fin d'une vue affichée (fermeture, réduction): sa dernière image
     /// est animée
     pub fn ghost_view(&mut self, i: usize, kind: GhostKind) {

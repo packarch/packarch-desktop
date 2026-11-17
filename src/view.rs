@@ -19,8 +19,11 @@ pub struct Resize {
     pub edges: Edges,
     pub initial_loc: Point<i32, Logical>,
     pub initial_size: Size<i32, Logical>,
-    /// Le geste est fini; on attend le dernier commit du client
-    pub ending: bool,
+    /// Dernière configuration envoyée pendant le geste
+    pub last_serial: Option<smithay::utils::Serial>,
+    /// Le geste est fini; on attend que le client ait appliqué la
+    /// configuration de ce numéro (`None`: pas fini)
+    pub ending: Option<Option<smithay::utils::Serial>>,
 }
 
 /// Direction d'une maximisation

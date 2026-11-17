@@ -102,7 +102,11 @@ fn main() {
             "info,smithay=warn"
         })
     });
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // Journal sur la sortie d'erreur (§ 12)
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
     if cli.reconfigure || cli.exit {
         let sig = if cli.exit { libc::SIGTERM } else { libc::SIGHUP };
         if let Err(e) = session::signal_instance(sig) {

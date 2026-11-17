@@ -18,13 +18,15 @@
 //! scroll down            un cran de molette (up, down, left, right)
 //! reconfigure            comme SIGHUP
 //! point un title         pointeur sur une partie de la vue de titre « un »:
-//!                        title, client, close, max, iconify, br (coin bas droit)
+//!                        title, client, close, max, iconify, br (coin bas
+//!                        droit), left, right, top, bottom (milieu d'un bord)
 //! expect-desktop 2       vérifie le bureau affiché (numéro à partir de 1)
 //! expect-focus un        vérifie la vue qui a le clavier
 //! expect un 10 38 640 724  vérifie le cadre d'une vue (x y largeur hauteur)
 //! move-by 50 -20         déplace le pointeur
 //! mark un                retient le cadre de la vue « un »
 //! expect-moved un 50 -20 vérifie son déplacement depuis `mark`
+//! expect-grown un 40 0   vérifie son changement de taille depuis `mark`
 //! expect-shaded un yes   vérifie l'enroulement (yes/no)
 //! expect-visible un no   vérifie l'affichage (réduite, autre bureau…)
 //! expect-menu root-menu prefs   vérifie les menus ouverts (none: aucun)
@@ -71,6 +73,7 @@ pub enum Step {
     MoveBy(f64, f64),
     Mark(String),
     ExpectMoved(String, i32, i32),
+    ExpectGrown(String, i32, i32),
     ExpectShaded(String, bool),
     ExpectVisible(String, bool),
     ExpectMenu(Vec<String>),
@@ -143,16 +146,21 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 }
                 "move-by" => Step::MoveBy(num(args.next())?, num(args.next())?),
                 "mark" => Step::Mark(rest.to_string()),
-                "expect-moved" | "expect-shaded" | "expect-visible" => {
+                "expect-moved" | "expect-grown" | "expect-shaded" | "expect-visible" => {
                     let v: Vec<&str> = rest.split_whitespace().collect();
                     let n = v.len();
-                    if cmd == "expect-moved" {
+                    if cmd == "expect-moved" || cmd == "expect-grown" {
                         if n < 3 {
-                            return Err("expect-moved TITRE dx dy".into());
+                            return Err(format!("{cmd} TITRE dx dy"));
                         }
                         let dx = v[n - 2].parse().map_err(|_| "dx")?;
                         let dy = v[n - 1].parse().map_err(|_| "dy")?;
-                        Step::ExpectMoved(v[..n - 2].join(" "), dx, dy)
+                        let t = v[..n - 2].join(" ");
+                        if cmd == "expect-moved" {
+                            Step::ExpectMoved(t, dx, dy)
+                        } else {
+                            Step::ExpectGrown(t, dx, dy)
+                        }
                     } else {
                         if n < 2 {
                             return Err(format!("{cmd} TITRE yes|no"));
@@ -249,6 +257,16 @@ fn point(
         "max" => button(Button::Maximize),
         "iconify" => button(Button::Iconify),
         "br" => Some(frame + layout.size.to_f64().to_point() + smithay::utils::Point::from((2.0, 2.0))),
+        "left" | "right" | "top" | "bottom" => {
+            let (w, h) = (layout.size.w as f64, layout.size.h as f64);
+            let p = match part {
+                "left" => (-2.0, h / 2.0),
+                "right" => (w + 1.0, h / 2.0),
+                "top" => (w / 2.0, -2.0),
+                _ => (w / 2.0, h + 1.0),
+            };
+            Some(frame + smithay::utils::Point::from(p))
+        }
         _ => None,
     }
 }
@@ -257,7 +275,7 @@ fn point(
 pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
     let mut steps = std::collections::VecDeque::from(steps);
     let mut waiting_since: Option<Instant> = None;
-    let mut marks: Vec<(String, smithay::utils::Point<i32, smithay::utils::Logical>)> = vec![];
+    let mut marks: Vec<(String, smithay::utils::Rectangle<i32, smithay::utils::Logical>)> = vec![];
     let _ = handle.insert_source(
         Timer::from_duration(Duration::from_millis(100)),
         move |_, _, state| {
@@ -335,13 +353,13 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                     Some(i) => {
                         let f = state.frame_rect(i);
                         marks.retain(|(t, _)| *t != title);
-                        marks.push((title, f.loc));
+                        marks.push((title, f));
                     }
                     None => fail(state, format!("pas de vue « {title} »")),
                 },
                 Step::ExpectMoved(title, dx, dy) => {
                     let i = state.views.iter().position(|v| v.title() == title);
-                    let m = marks.iter().find(|(t, _)| *t == title).map(|(_, p)| *p);
+                    let m = marks.iter().find(|(t, _)| *t == title).map(|(_, p)| p.loc);
                     match (i, m) {
                         (Some(i), Some(m)) => {
                             let d = state.frame_rect(i).loc - m;
@@ -356,6 +374,26 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                             }
                         }
                         _ => fail(state, format!("expect-moved: « {title} » sans mark")),
+                    }
+                }
+                Step::ExpectGrown(title, dw, dh) => {
+                    let i = state.views.iter().position(|v| v.title() == title);
+                    let m = marks.iter().find(|(t, _)| *t == title).map(|(_, r)| r.size);
+                    match (i, m) {
+                        (Some(i), Some(m)) => {
+                            let s = state.frame_rect(i).size;
+                            if (s.w - m.w, s.h - m.h) != (dw, dh) {
+                                fail(
+                                    state,
+                                    format!(
+                                        "« {title} » agrandie de ({}, {}) au lieu de ({dw}, {dh})",
+                                        s.w - m.w,
+                                        s.h - m.h
+                                    ),
+                                );
+                            }
+                        }
+                        _ => fail(state, format!("expect-grown: « {title} » sans mark")),
                     }
                 }
                 Step::ExpectShaded(title, b) | Step::ExpectVisible(title, b) => {

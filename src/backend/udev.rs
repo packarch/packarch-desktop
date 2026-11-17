@@ -50,6 +50,10 @@ struct Surface {
     queued: bool,
     /// Éteint (wlopm)
     off: bool,
+    /// L'image a changé depuis le dernier rendu
+    dirty: bool,
+    /// Un rendu est déjà prévu
+    scheduled: bool,
 }
 
 pub struct Udev {
@@ -360,6 +364,8 @@ impl State {
                     modes: info.modes().to_vec(),
                     queued: false,
                     off: false,
+                    dirty: true,
+                    scheduled: false,
                 },
             );
         }
@@ -389,17 +395,6 @@ impl State {
         }
     }
 
-    /// Redessine tous les écrans
-    pub fn udev_render_all(&mut self) {
-        let crtcs: Vec<crtc::Handle> = match self.backend.as_ref() {
-            Some(Backend::Udev(u)) => u.surfaces.keys().copied().collect(),
-            _ => vec![],
-        };
-        for c in crtcs {
-            self.udev_render(c);
-        }
-    }
-
     fn udev_vblank(&mut self, crtc: crtc::Handle) {
         let Some(u) = self.udev() else { return };
         let Some(s) = u.surfaces.get_mut(&crtc) else {
@@ -409,14 +404,34 @@ impl State {
             warn!("vblank: {e:?}");
         }
         s.queued = false;
-        self.udev_render(crtc);
+        if s.dirty {
+            self.udev_render(crtc);
+        }
     }
 
-    /// Dessine un écran; s'il n'y a rien de neuf, réessaie un peu plus tard
+    /// Quelque chose a changé: les écrans au repos sont redessinés dès que
+    /// la boucle d'événements a fini son tour
+    pub fn udev_request_redraw(&mut self) {
+        let handle = self.handle.clone();
+        let Some(u) = self.udev() else { return };
+        for (crtc, s) in u.surfaces.iter_mut() {
+            s.dirty = true;
+            if !s.queued && !s.scheduled && !s.off {
+                s.scheduled = true;
+                let crtc = *crtc;
+                handle.insert_idle(move |state| state.udev_render(crtc));
+            }
+        }
+    }
+
+    /// Dessine un écran; le suivant le sera au vblank s'il a encore changé
     fn udev_render(&mut self, crtc: crtc::Handle) {
         let Some(Backend::Udev(mut u)) = self.backend.take() else {
             return;
         };
+        if let Some(s) = u.surfaces.get_mut(&crtc) {
+            s.scheduled = false;
+        }
         if !u.session.is_active() {
             self.backend = Some(Backend::Udev(u));
             return;
@@ -433,7 +448,9 @@ impl State {
         let mut elements = self.cursor_elements(&mut u.renderer, &output);
         elements.extend(output_elements(self, &mut u.renderer, &output));
         crate::protocols::screencopy::process(self, &mut u.renderer, &output, &elements);
+        let animating = self.animating();
         let s = u.surfaces.get_mut(&crtc).unwrap();
+        s.dirty = animating;
         let mut queued = false;
         match s.compositor.render_frame(
             &mut u.renderer,
@@ -443,6 +460,11 @@ impl State {
         ) {
             Ok(frame) if !frame.is_empty => match s.compositor.queue_frame(()) {
                 Ok(()) => queued = true,
+                // Changement de console: l'accès à l'écran est retiré juste
+                // avant la pause de la session
+                Err(e) if format!("{e:?}").contains("PermissionDenied") => {
+                    debug!("{}: écran inaccessible (changement de console)", output.name())
+                }
                 Err(e) => warn!("{}: {e:?}", output.name()),
             },
             Ok(_) => {}
@@ -451,8 +473,8 @@ impl State {
         s.queued = queued;
         self.backend = Some(Backend::Udev(u));
         after_render(self, &output);
-        if !queued {
-            // Rien à afficher: nouvel essai à la prochaine image
+        if !queued && animating {
+            // Animation sans changement visible cette fois: image suivante
             let refresh = output
                 .current_mode()
                 .map(|m| m.refresh)
@@ -490,6 +512,7 @@ impl State {
                         warn!("{e}");
                     }
                     s.queued = false;
+                    s.dirty = true;
                     crtcs.push(*crtc);
                 }
                 self.udev_scan();

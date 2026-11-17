@@ -12,10 +12,10 @@ use smithay::backend::input::{
 use smithay::desktop::Window;
 use smithay::input::keyboard::{FilterResult, Keycode, Keysym, keysyms};
 use smithay::input::pointer::{
-    AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
-    GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
-    GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
-    RelativeMotionEvent,
+    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
+    GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+    GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab,
+    PointerInnerHandle, RelativeMotionEvent,
 };
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -79,6 +79,20 @@ enum KeyResult {
     CancelCycle,
     /// Ctrl+Alt+Fn: console n
     Vt(i32),
+}
+
+/// Curseur d'un redimensionnement par ces bords
+pub fn resize_cursor(e: Edges) -> CursorIcon {
+    match (e.top, e.bottom, e.left, e.right) {
+        (true, _, true, _) => CursorIcon::NwResize,
+        (true, _, _, true) => CursorIcon::NeResize,
+        (_, true, true, _) => CursorIcon::SwResize,
+        (_, true, _, true) => CursorIcon::SeResize,
+        (true, ..) => CursorIcon::NResize,
+        (_, true, ..) => CursorIcon::SResize,
+        (_, _, true, _) => CursorIcon::WResize,
+        _ => CursorIcon::EResize,
+    }
 }
 
 fn is_modifier(sym: Keysym) -> bool {
@@ -466,6 +480,20 @@ impl State {
             let raise = self.config.raise_on_focus;
             self.focus_view(i, raise);
         }
+        // Curseur du compositeur hors des clients: flèches de
+        // redimensionnement sur les bords, flèche ailleurs (les clients
+        // choisissent le leur en entrant)
+        if !self.seat.get_pointer().is_some_and(|p| p.is_grabbed()) {
+            match &under {
+                Under::Frame(_, Part::Border(e)) => {
+                    self.cursor_status = CursorImageStatus::Named(resize_cursor(*e));
+                }
+                Under::Frame(..) | Under::Root => {
+                    self.cursor_status = CursorImageStatus::default_named();
+                }
+                _ => {}
+            }
+        }
         let focus = match self.under(pos) {
             Under::View(_, s, loc) | Under::Layer(s, loc, _) => Some((s, loc)),
             _ => None,
@@ -502,6 +530,21 @@ impl State {
                     location: press.location,
                 };
                 self.run_actions(&actions, press.window.clone(), origin);
+                // Le geste commencé (déplacement, redimensionnement) reçoit
+                // aussi le mouvement qui l'a déclenché
+                let pointer = self.seat.get_pointer().unwrap();
+                if pointer.is_grabbed() {
+                    pointer.motion(
+                        self,
+                        None,
+                        &MotionEvent {
+                            location: pos,
+                            serial: SERIAL_COUNTER.next_serial(),
+                            time,
+                        },
+                    );
+                    pointer.frame(self);
+                }
             }
         }
     }
@@ -983,6 +1026,7 @@ impl PointerGrab<State> for MoveGrab {
         if grab_ends(self.keyboard, self.start.button, handle, event) {
             handle.unset_grab(self, data, event.serial, event.time, true);
             data.snap_preview = None;
+            data.cursor_status = CursorImageStatus::default_named();
             if let Some(edge) = self.snap.take()
                 && let Some(i) = data.window_index(&self.window)
             {
@@ -1035,7 +1079,12 @@ impl PointerGrab<State> for ResizeGrab {
         };
         let size = Size::from((clamp(w, min.w, max.w), clamp(h, min.h, max.h)));
         toplevel.with_pending_state(|s| s.size = Some(size));
-        toplevel.send_pending_configure();
+        if let Some(serial) = toplevel.send_pending_configure()
+            && let Some(i) = data.window_index(&self.window)
+            && let Some(r) = data.views[i].resize.as_mut()
+        {
+            r.last_serial = Some(serial);
+        }
     }
 
     fn button(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, event: &ButtonEvent) {
@@ -1044,13 +1093,14 @@ impl PointerGrab<State> for ResizeGrab {
         }
         if grab_ends(self.keyboard, self.start.button, handle, event) {
             handle.unset_grab(self, data, event.serial, event.time, true);
+            data.cursor_status = CursorImageStatus::default_named();
             let toplevel = self.window.toplevel().unwrap();
             toplevel.with_pending_state(|s| s.states.unset(xdg_toplevel::State::Resizing));
-            toplevel.send_pending_configure();
+            let serial = toplevel.send_pending_configure();
             if let Some(i) = data.window_index(&self.window)
                 && let Some(r) = data.views[i].resize.as_mut()
             {
-                r.ending = true;
+                r.ending = Some(serial.or(r.last_serial));
             }
         }
     }

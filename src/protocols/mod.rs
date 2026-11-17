@@ -246,6 +246,7 @@ impl State {
     pub fn activity(&mut self) {
         let seat = self.seat.clone();
         self.protocols.idle_notifier.notify_activity(&seat);
+        self.request_redraw();
     }
 }
 

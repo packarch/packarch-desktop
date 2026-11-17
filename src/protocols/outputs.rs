@@ -346,8 +346,13 @@ impl State {
     /// Redessine tous les écrans (session réelle; les autres backends
     /// dessinent en continu)
     pub fn render_all(&mut self) {
+        self.request_redraw();
+    }
+
+    /// L'image a changé: à redessiner (session réelle)
+    pub fn request_redraw(&mut self) {
         if matches!(self.backend, Some(crate::backend::Backend::Udev(_))) {
-            self.udev_render_all();
+            self.udev_request_redraw();
         }
     }
 }
