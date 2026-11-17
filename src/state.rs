@@ -176,6 +176,9 @@ pub struct State {
     pub autostarted: bool,
     /// L'environnement a été exporté vers systemd et D-Bus
     pub env_exported: bool,
+    /// Bus D-Bus propre à la session (adresse, processus), quand une autre
+    /// session est active
+    pub private_bus: Option<(String, i32)>,
     /// Raccourcis désactivés (ToggleKeybinds), sauf celui qui les rétablit
     pub keybinds_off: bool,
     /// Curseurs du thème (session réelle)
@@ -348,6 +351,7 @@ impl State {
             autostarted: false,
             env_exported: false,
             keybinds_off: false,
+            private_bus: None,
         }
     }
 

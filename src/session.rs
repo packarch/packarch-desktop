@@ -58,6 +58,9 @@ impl State {
         if let Some(n) = self.xwayland.display {
             vars.push(("DISPLAY".to_string(), format!(":{n}")));
         }
+        if let Some((address, _)) = &self.private_bus {
+            vars.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), address.clone()));
+        }
         vars.extend(self.env_vars.iter().cloned());
         self.child_env = vars;
     }
@@ -130,6 +133,21 @@ impl State {
     /// Démarrage de la session, après la mise en place de l'affichage
     pub fn start_session(&mut self) {
         let display = self.socket_name.to_string_lossy().to_string();
+        // Session réelle à côté d'une autre (essai sur une autre console):
+        // bus D-Bus à part, pour que les applications à instance unique
+        // (Thunar…) ne s'ouvrent pas dans l'autre session
+        if matches!(self.backend, Some(crate::backend::Backend::Udev(_)))
+            && let Some(other) = other_session_display(&display)
+        {
+            match start_private_bus() {
+                Ok(bus) => {
+                    info!("autre session active ({other}): bus D-Bus à part ({})", bus.0);
+                    self.private_bus = Some(bus);
+                    self.apply_session_env();
+                }
+                Err(e) => warn!("bus D-Bus à part: {e}"),
+            }
+        }
         if let Some(path) = pid_file(&display)
             && let Err(e) = std::fs::write(&path, format!("{}\n", std::process::id()))
         {
@@ -165,6 +183,12 @@ impl State {
         if let Some(path) = pid_file(&self.socket_name.to_string_lossy()) {
             let _ = std::fs::remove_file(path);
         }
+        if let Some((_, pid)) = self.private_bus {
+            // Sûr: simple appel système vers notre propre bus
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+        }
         // Les variables exportées ne doivent pas survivre à la session
         if self.env_exported {
             let _ = std::process::Command::new("systemctl")
@@ -179,6 +203,25 @@ impl State {
                 ])
                 .status();
         }
+    }
+}
+
+/// Lance un bus D-Bus de session pour cette session seulement: adresse et
+/// numéro de processus
+fn start_private_bus() -> Result<(String, i32), String> {
+    let out = std::process::Command::new("dbus-daemon")
+        .args(["--session", "--fork", "--print-address=1", "--print-pid=1"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines();
+    let address = lines.next().map(str::trim).filter(|a| !a.is_empty());
+    let pid = lines.next().and_then(|p| p.trim().parse::<i32>().ok());
+    match (address, pid) {
+        (Some(a), Some(p)) => Ok((a.to_string(), p)),
+        _ => Err(format!("réponse inattendue de dbus-daemon: {text:?}")),
     }
 }
 
