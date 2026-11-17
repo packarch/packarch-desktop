@@ -1,14 +1,15 @@
 # Cahier des charges de packarch-rwdesktop
 
-Version 0.1, 17 novembre 2026. Document de travail, sous MIT ou Apache-2.0
+Version 0.2, 17 novembre 2026. Document de travail, sous MIT ou Apache-2.0
 au choix, comme le code.
 
-packarch-rwdesktop est un compositeur Wayland à fenêtres flottantes
-(« stacking »), écrit en Rust sur la boîte à outils Smithay. Il vise le bureau
+packarch-rwdesktop (paquet `packarch-rwdesktop`, programme `packarch`) est
+un compositeur Wayland à fenêtres flottantes (« stacking »), écrit en Rust sur la boîte à outils Smithay. Il vise le bureau
 de Packarch : fenêtres décorées par le compositeur avec coins arrondis et
 ombres, menus du bureau arrondis et ombrés, thèmes Openbox, configuration au
 format Openbox (`rc.xml`, `menu.xml`), barre et outils Wayland habituels
-(waybar, rofi, mako, swaybg, hyprlock, grim…).
+(waybar, rofi, mako, swaybg, hyprlock, grim…), avec des animations
+sobres.
 
 Ce document décrit **ce que le compositeur doit faire**, pas comment un autre
 projet le fait. Il sert de référence unique pour écrire le code (voir
@@ -85,7 +86,8 @@ projet le fait. Il sert de référence unique pour écrire le code (voir
 ### 2.2 Hors périmètre (au moins jusqu'à la version 1.0)
 
 - Pavage automatique (« tiling »), défilement à la niri.
-- Animations autres que des fondus courts optionnels.
+- Animations spectaculaires (fenêtres « en gelée », cubes, flous animés) :
+  seules les animations du § 10.5 sont prévues.
 - Panneau, lanceur, notifications, fond d'écran intégrés : ce sont des
   programmes séparés (waybar, rofi, mako, swaybg).
 - Session X11. Seul XWayland est prévu, pour les applications X11.
@@ -144,6 +146,7 @@ src/
   actions.rs         toutes les actions (§ 7), exécutées depuis raccourcis, menus, règles
   menu/              menus dessinés, pipemenus, navigation clavier
   osd/               Alt+Tab, nom du bureau, taille pendant un redimensionnement
+  anim/              horloge, courbes, animations en cours (§ 10.5)
   protocols/         protocoles annexes (§ 9)
   ipc.rs             --reconfigure, --exit, signaux
 ```
@@ -167,9 +170,13 @@ src/
 
 ### 5.1 Emplacement
 
-- Dossier : `$XDG_CONFIG_HOME/packarch-rwdesktop/` (par défaut
-  `~/.config/packarch-rwdesktop/`), puis `/etc/xdg/packarch-rwdesktop/` pour
-  les fichiers absents.
+- Dossier : `$XDG_CONFIG_HOME/packarch/` (par défaut `~/.config/packarch/`),
+  puis `/etc/xdg/packarch/` pour les fichiers absents.
+- Ce dossier existe déjà sur les machines Packarch : packarch-hello et
+  packarch-pi y rangent leurs réglages dans des sous-dossiers
+  (`packarch-hello/`, `packarch-pi/`, `packarch-pi.conf`). Le compositeur ne
+  lit que ses propres fichiers (liste ci-dessous) et ses propres
+  sous-dossiers (`themes/`, `scripts/`…), et ne touche jamais aux autres.
 - `-C, --config-dir DOSSIER` choisit un autre dossier. Il permet d'essayer le
   compositeur sur une copie de `~/.config/labwc`.
 - Fichiers lus : `rc.xml`, `menu.xml`, `environment`, `autostart`,
@@ -203,6 +210,7 @@ marqués **P**, ils sont prioritaires) :
 | `mouse` | `doubleClickTime`, `context name=` → `mousebind` **P** |
 | `libinput` | `device category=` (default, touchpad, non-touch…) : `tap`, `naturalScroll`, `middleEmulation`, `disableWhileTyping`, `accelProfile`, `pointerSpeed`, `leftHanded`, `scrollMethod` **P** pour les quatre premiers |
 | `windowRules` | `windowRule` (§ 8.5) **P** |
+| `animations` | `enabled`, `speed`, et par animation `duration` (ms), `curve` (§ 10.5) |
 
 ### 5.3 Raccourcis clavier
 
@@ -267,14 +275,14 @@ marqués **P**, ils sont prioritaires) :
   l'affichage, avec `WAYLAND_DISPLAY` défini.
 - `shutdown` : script lancé avant la fermeture de la session.
 - Variables exportées aux clients : `WAYLAND_DISPLAY`, `DISPLAY` (XWayland),
-  `XDG_CURRENT_DESKTOP` (valeur à fixer, voir § 11), `RWDESKTOP_PID`.
+  `XDG_CURRENT_DESKTOP=packarch:wlroots` (voir § 11), `PACKARCH_PID`.
   Ces variables sont aussi envoyées au gestionnaire de session de systemd
   et à D-Bus (`dbus-update-activation-environment --systemd`), pour les
   portails et les services.
 
 ### 5.7 Rechargement
 
-- `rwdesktop --reconfigure` (ou SIGHUP) relit `rc.xml`, `menu.xml`,
+- `packarch --reconfigure` (ou SIGHUP) relit `rc.xml`, `menu.xml`,
   `environment`, le thème et `themerc-override`, sans fermer les
   fenêtres.
 - Une erreur de syntaxe XML garde l'ancienne configuration et affiche un
@@ -289,7 +297,7 @@ marqués **P**, ils sont prioritaires) :
 Le thème `theme/name` est cherché dans, dans l'ordre :
 `$XDG_DATA_HOME/themes/NOM`, `~/.themes/NOM`, `/usr/share/themes/NOM`
 (et les autres `$XDG_DATA_DIRS`). Fichier lu : `openbox-3/themerc`
-(ou `packarch-rwdesktop/themerc` s'il existe, prioritaire).
+(ou `packarch/themerc` s'il existe, prioritaire).
 Puis `themerc-override` du dossier de configuration remplace clé par clé.
 
 ### 6.2 Format `themerc`
@@ -512,7 +520,7 @@ raccourci par défaut), `ZoomIn`/`ZoomOut` (loupe, priorité 3).
 Pas de portail intégré. Packarch installe `xdg-desktop-portal-wlr` (capture
 d'écran, partage d'écran dans Firefox) et `xdg-desktop-portal-gtk` (choix de
 fichiers) ; le compositeur fournit les protocoles qu'ils demandent
-(screencopy, output) et un fichier `packarch-rwdesktop-portals.conf`.
+(screencopy, output) et un fichier `packarch-portals.conf`.
 
 ### 9.4 XWayland
 
@@ -582,13 +590,54 @@ fichiers) ; le compositeur fournit les protocoles qu'ils demandent
 - Le menu reste entièrement sur l'écran du pointeur. Un clic hors du menu le
   ferme sans transmettre le clic.
 
-### 10.5 Performances
+### 10.5 Animations
+
+Sobres, courtes, jamais bloquantes : une action reste immédiate (le focus,
+la position finale et les événements d'entrée changent tout de suite), seule
+l'image est animée. Une nouvelle action pendant une animation la remplace en
+partant de l'état affiché.
+
+| Animation | Effet | Durée par défaut |
+|---|---|---|
+| Ouverture d'une vue | Fondu de 0 à 1 et agrandissement de 94 % à 100 %, depuis le centre | 160 ms |
+| Fermeture d'une vue | Inverse, sur la dernière image du client gardée en mémoire | 140 ms |
+| Réduction et restauration | Fondu et rétrécissement vers le bas de l'écran (ou vers l'entrée de la barre des tâches si connue) | 180 ms |
+| Maximisation, collage, région | Passage du rectangle de départ au rectangle final, contenu étiré puis remplacé par la nouvelle image du client | 180 ms |
+| Ouverture et fermeture des menus et sous-menus | Fondu et glissement de 4 px | 100 ms |
+| Alt+Tab et OSD | Fondu | 100 ms |
+| Changement de bureau | Glissement horizontal des vues (gauche/droite selon le numéro) | 220 ms |
+| Aperçu de collage | Fondu et croissance du rectangle translucide | 120 ms |
+| Enroulement | Hauteur animée jusqu'à la barre de titre | 140 ms |
+
+- Courbes : `ease-out-cubic` par défaut ; `linear`, `ease-in-out-cubic`,
+  et ressort amorti (`spring`, avec raideur et amortissement) disponibles.
+- Configuration dans `rc.xml` :
+
+  ```xml
+  <animations enabled="yes" speed="1.0">
+    <window-open duration="160" curve="ease-out-cubic" />
+    <workspace-switch duration="220" curve="spring" />
+    <menu enabled="no" />
+  </animations>
+  ```
+
+  `speed` multiplie toutes les durées (0,5 = deux fois plus rapide) ;
+  `enabled="no"` ou `--no-animations` désactive tout.
+- Désactivées automatiquement avec le backend pixman (pas de GPU) et en
+  plein écran direct ; les ombres et coins suivent l'animation.
+- Horloge : celle des rafraîchissements d'écran (presentation feedback),
+  pas l'horloge murale ; un écran à 144 Hz anime à 144 images par seconde.
+- Tests : horloge simulée, pour des captures reproductibles à un instant
+  donné de l'animation.
+
+### 10.6 Performances
 
 - Rendu par dommage (seules les zones modifiées sont redessinées).
 - Plein écran direct (« direct scanout ») quand une seule vue opaque couvre
   l'écran.
 - Pas plus d'un rendu par rafraîchissement d'écran ; aucune image perdue
-  pendant un déplacement de fenêtre à 60 Hz sur un GPU intégré.
+  pendant un déplacement de fenêtre ou une animation à 60 Hz sur un GPU
+  intégré.
 
 ---
 
@@ -597,15 +646,15 @@ fichiers) ; le compositeur fournit les protocoles qu'ils demandent
 Aucun paquet de Packarch n'est modifié tant que le compositeur n'a pas
 atteint la version 0.5 (§ 14). Prévu ensuite :
 
-- Paquet `packarch-rwdesktop` (binaire `rwdesktop`, fichier de session
-  `/usr/share/wayland-sessions/packarch-rwdesktop.desktop`, portails,
-  configuration par défaut dans `/etc/xdg/packarch-rwdesktop/`).
-- `XDG_CURRENT_DESKTOP=packarch-rwdesktop:wlroots`. La partie `wlroots`
+- Paquet `packarch-rwdesktop` (programme `/usr/bin/packarch`, fichier de
+  session `/usr/share/wayland-sessions/packarch.desktop`, portails,
+  configuration par défaut dans `/etc/xdg/packarch/`).
+- `XDG_CURRENT_DESKTOP=packarch:wlroots`. La partie `wlroots`
   permet aux outils (portail wlr, waybar…) de reconnaître un compositeur qui
   fournit les protocoles wlr.
 - packarch-skin : nouvelle cible qui écrit dans
-  `~/.config/packarch-rwdesktop/` (mêmes fichiers qu'aujourd'hui) et lance
-  `rwdesktop --reconfigure`.
+  `~/.config/packarch/` (mêmes fichiers qu'aujourd'hui) et lance
+  `packarch --reconfigure`.
 - packarch-labwc-settings : soit adapté, soit doublé par
   `packarch-rwdesktop-settings` (mêmes scripts, menus et barres).
 - Calamares et packarch-depannage : choix du bureau.
@@ -615,7 +664,7 @@ atteint la version 0.5 (§ 14). Prévu ensuite :
 ## 12. Ligne de commande et interfaces
 
 ```
-rwdesktop [OPTIONS]
+packarch [OPTIONS]
   -C, --config-dir DOSSIER   dossier de configuration
   -s, --startup COMMANDE     commande lancée après autostart
   -r, --reconfigure          demande à l'instance en cours de recharger
@@ -623,10 +672,11 @@ rwdesktop [OPTIONS]
   -v, --version              version (avec le commit git)
   -d, --debug                journal détaillé
       --backend udev|winit|headless
+      --no-animations            désactive les animations (§ 10.5)
 ```
 
-- L'instance en cours est trouvée par `RWDESKTOP_PID`, puis par un fichier
-  `$XDG_RUNTIME_DIR/rwdesktop-$WAYLAND_DISPLAY.pid`.
+- L'instance en cours est trouvée par `PACKARCH_PID`, puis par un fichier
+  `$XDG_RUNTIME_DIR/packarch-$WAYLAND_DISPLAY.pid`.
 - Signaux : SIGHUP recharge, SIGTERM quitte proprement.
 - Journal : sortie d'erreur, niveau `info` ; `RUST_LOG` respecté.
 
@@ -659,20 +709,23 @@ rwdesktop [OPTIONS]
 |---|---|---|
 | **0.1 prototype** | Backends winit et headless, xdg-shell, layer-shell, cadre simple, coins arrondis et ombres des fenêtres, thème OB lu, waybar et swaybg affichés | kitty et Thunar déplaçables dans une session imbriquée, ombres et coins corrects sur capture |
 | **0.2 configuration** | `rc.xml` complet pour les sections **P**, raccourcis (AZERTY), souris, `environment`, `autostart`, rechargement | Le `rc.xml` de Packarch se charge sans avertissement, tous ses raccourcis répondent |
-| **0.3 menus** | `menu.xml`, pipemenus, menus de fenêtre et liste des fenêtres, arrondis et ombrés | Le menu de Packarch (Super+Espace) fonctionne en entier, pipemenus compris |
-| **0.4 session** | Backend udev, plusieurs écrans, verrouillage, inactivité, capture, barre des tâches, bureaux, Alt+Tab | Une journée de travail sur packarch-test sans retour à labwc |
+| **0.3 menus** | `menu.xml`, pipemenus, menus de fenêtre et liste des fenêtres, arrondis et ombrés ; moteur d'animation, animations des menus et des fenêtres | Le menu de Packarch (Super+Espace) fonctionne en entier, pipemenus compris |
+| **0.4 session** | Backend udev, plusieurs écrans, verrouillage, inactivité, capture, barre des tâches, bureaux (avec glissement), Alt+Tab | Une journée de travail sur packarch-test sans retour à labwc |
 | **0.5 XWayland** | X11Wm, règles de fenêtres, collage et régions, portails | Steam, LibreOffice et un jeu X11 utilisables ; début de l'intégration (§ 11) |
 | **1.0** | Priorité 2 des actions, finitions, documentation `man` | Bureau par défaut de Packarch |
 
 ---
 
-## 15. Questions ouvertes
+## 15. Décisions et questions ouvertes
 
-1. Nom du binaire : `rwdesktop` ou `packarch-rwdesktop` ?
-2. Dossier de configuration : propre (`~/.config/packarch-rwdesktop/`,
-   proposé ici) ou lecture directe de `~/.config/labwc/` pour une transition
-   sans copie ?
-3. Racine XML de `rc.xml` : garder `<labwc_config>` accepté à long terme,
-   ou migrer les fichiers de Packarch vers `<openbox_config>` ?
-4. Animations (fondu à l'ouverture et à la fermeture des fenêtres et des
-   menus) : à prévoir dès la 0.3, ou jamais ?
+Décidé le 17 novembre 2026 :
+
+1. Programme `packarch` (paquet `packarch-rwdesktop`).
+2. Dossier de configuration propre : `~/.config/packarch/`.
+3. Animations prévues (§ 10.5), dès la version 0.3.
+
+Reste ouvert :
+
+1. Racine XML de `rc.xml` : garder `<labwc_config>` accepté à long terme,
+   ou n'accepter que `<openbox_config>` (et une racine à nous,
+   `<packarch_config>`) ?

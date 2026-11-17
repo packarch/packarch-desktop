@@ -1,9 +1,10 @@
 # packarch-rwdesktop
 
-Compositeur Wayland à fenêtres flottantes pour Packarch, écrit en Rust sur
+Compositeur Wayland à fenêtres flottantes pour Packarch (programme
+`packarch`, configuration dans `~/.config/packarch/`), écrit en Rust sur
 [Smithay](https://github.com/Smithay/smithay) : fenêtres et menus aux coins
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
-`menu.xml`, `themerc`).
+`menu.xml`, `themerc`), animations sobres.
 
 État : cahier des charges, pas encore de code. Voir
 [docs/cahier-des-charges.md](docs/cahier-des-charges.md).
