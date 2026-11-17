@@ -751,5 +751,16 @@ Décidé le 17 novembre 2026 :
    `autostart` attend qu'il soit prêt (3 s au plus) pour que `DISPLAY` soit
    défini. Les fenêtres X11 sans indication Motif reçoivent le cadre du
    compositeur ; celles qui demandent « sans décoration » (Steam…) non.
+9. Actions de priorité 2 : `ShrinkToEdge` rentre le bord donné jusqu'au
+   bord d'une autre fenêtre à l'intérieur, sinon de moitié ; `MoveTo` est
+   relatif à la zone utile ; `ResizeTo` donne la taille du client.
+   Requêtes `If`/`ForEach` : `identifier`, `title` (jokers), `maximized`,
+   `iconified`, `focused`, `omnipresent`, `shaded`, `fullscreen`,
+   `desktop` ; plusieurs `<query>` : l'une suffit.
+10. `popupShow` : la taille est affichée au centre de la fenêtre ; en
+    caractères seulement pour les clients X11 qui donnent un pas de
+    redimensionnement (les clients Wayland n'en donnent pas).
+11. Le protocole xdg-toplevel-icon n'est pas proposé : avec Smithay 0.7,
+    il empêche certaines applications Qt de s'afficher.
 
 Aucune question ouverte pour l'instant.

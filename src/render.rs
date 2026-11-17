@@ -14,7 +14,9 @@ use smithay::backend::renderer::element::surface::{
     WaylandSurfaceRenderElement, render_elements_from_surface_tree,
 };
 use smithay::backend::renderer::element::texture::TextureRenderElement;
-use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement, RescaleRenderElement};
+use smithay::backend::renderer::element::utils::{
+    CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
+};
 use smithay::backend::renderer::element::{AsRenderElements, Id, Kind};
 use smithay::backend::renderer::gles::element::{PixelShaderElement, TextureShaderElement};
 use smithay::backend::renderer::gles::{
@@ -51,6 +53,7 @@ render_elements! {
     Clipped=TextureShaderElement,
     Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
     Anim=RelocateRenderElement<RescaleRenderElement<Base>>,
+    Crop=CropRenderElement<Base>,
 }
 
 /// Distance signée à un rectangle aux coins arrondis (rayon du haut et du
@@ -499,8 +502,20 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
     }
     elements.extend(layer_elements(renderer, Layer::Top));
 
-    // Aperçu du collage, devant les fenêtres
-    if let Some(rect) = state.snap_preview {
+    // Aperçu du collage, devant les fenêtres: fondu et croissance à chaque
+    // nouveau rectangle
+    if state.snap_preview.is_none() {
+        state.snap_shown = None;
+    }
+    if let Some((full, anim)) = state.snap_shown {
+        let p = match anim {
+            Some(a) if !a.done(now) => a.value(now),
+            _ => 1.0,
+        };
+        let k = lerp(0.9, 1.0, p);
+        let size = full.size.to_f64().upscale(k).to_i32_round::<i32>();
+        let rect = Rectangle::new(full.loc + (full.size - size).to_point().downscale(2), size);
+        let alpha = p.clamp(0.0, 1.0) as f32;
         let c = state.theme.active.title_bg;
         let fill = crate::theme::Color::rgba(c.r, c.g, c.b, 0.35);
         let border = state.theme.active.label_text;
@@ -508,7 +523,7 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         elements.push(Elem::Pixel(pixel(
             &progs.frame,
             Rectangle::new(rect.loc - output_loc, rect.size),
-            1.0,
+            alpha,
             vec![
                 Uniform::new(
                     "border_color",
@@ -538,6 +553,26 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         };
         let base = snapshot_elements(&g.snapshot, renderer, &progs, scale, output_loc, look.alpha, None);
         elements.extend(transform(base, look, g.snapshot.frame, output_loc, scale));
+    }
+
+    // Contour d'un redimensionnement sans dessin du contenu
+    if let Some(f) = state.resize_outline {
+        let c = state.theme.osd.hilight_bg;
+        let radius = state.config.corner_radius as f32;
+        elements.push(Elem::Pixel(pixel(
+            &progs.frame,
+            Rectangle::new(f.loc - output_loc, f.size),
+            1.0,
+            vec![
+                Uniform::new("border_color", c.premultiplied()),
+                Uniform::new("title_color", [0.0f32; 4]),
+                Uniform::new("radius_top", radius),
+                Uniform::new("radius_bottom", radius),
+                Uniform::new("border", 2.0f32),
+                Uniform::new("title_height", 0.0f32),
+                Uniform::new("px", px(scale)),
+            ],
+        )));
     }
 
     // Contour de la vue choisie pendant Alt+Tab
@@ -645,7 +680,82 @@ fn animated_view(
         None => Look::none(),
     };
     look.offset.x += shift;
+    // Rectangle animé (maximisation, collage): l'image actuelle est étirée
+    // du cadre affiché au rectangle intermédiaire
+    let geom = match state.views[i].geom_anim {
+        Some((a, from, to)) if !a.done(now) && look.is_identity() => {
+            let p = a.value(now);
+            let r = |a: i32, b: i32| lerp(a as f64, b as f64, p);
+            Some(Rectangle::<f64, Logical>::new(
+                (r(from.loc.x, to.loc.x), r(from.loc.y, to.loc.y)).into(),
+                (r(from.size.w, to.size.w), r(from.size.h, to.size.h)).into(),
+            ))
+        }
+        Some(_) => {
+            state.views[i].geom_anim = None;
+            None
+        }
+        None => None,
+    };
+    // Enroulement: l'image est découpée à la hauteur animée
+    let shade = match state.views[i].shade_anim.take() {
+        Some((a, shading, full)) if !a.done(now) => {
+            let p = a.value(now).clamp(0.0, 1.0);
+            let short = frame
+                .size
+                .h
+                .min(full.as_ref().map(|f| f.frame.size.h).unwrap_or(frame.size.h));
+            let layout = state.layout(&state.views[i]);
+            let title_only = layout.title_height + 2 * layout.border;
+            let (lo, hi) = if shading {
+                (
+                    short,
+                    full.as_ref().map(|f| f.frame.size.h).unwrap_or(frame.size.h),
+                )
+            } else {
+                (title_only.min(frame.size.h), frame.size.h)
+            };
+            let h = if shading {
+                lerp(hi as f64, lo as f64, p)
+            } else {
+                lerp(lo as f64, hi as f64, p)
+            };
+            state.views[i].shade_anim = Some((a, shading, full.clone()));
+            Some((h.round() as i32, shading, full))
+        }
+        _ => None,
+    };
+    if let Some((h, shading, full)) = shade {
+        let snap_frame = full.as_ref().map(|f| f.frame).unwrap_or(frame);
+        let elements = match (shading, full) {
+            (true, Some(f)) => snapshot_elements(&f, renderer, progs, scale, output_loc, 1.0, None),
+            _ => view_elements(state, renderer, i, scale, output_loc, progs, 1.0),
+        };
+        let crop = Rectangle::<i32, Logical>::new(snap_frame.loc - output_loc, (snap_frame.size.w, h).into())
+            .to_physical_precise_round(scale);
+        return elements
+            .into_iter()
+            .filter_map(|e| CropRenderElement::from_element(e, scale, crop).map(Elem::Crop))
+            .collect();
+    }
     let base = view_elements(state, renderer, i, scale, output_loc, progs, look.alpha);
+    if let Some(target) = geom {
+        let f = frame.to_f64();
+        let sx = target.size.w / f.size.w.max(1.0);
+        let sy = target.size.h / f.size.h.max(1.0);
+        let origin = (frame.loc - output_loc).to_physical_precise_round(scale);
+        let offset = (target.loc - f.loc).to_physical(scale).to_i32_round();
+        return base
+            .into_iter()
+            .map(|e| {
+                Elem::Anim(RelocateRenderElement::from_element(
+                    RescaleRenderElement::from_element(e, origin, (sx, sy)),
+                    offset,
+                    Relocate::Relative,
+                ))
+            })
+            .collect();
+    }
     if look.is_identity() {
         base.into_iter().map(Elem::from).collect()
     } else {
@@ -792,10 +902,15 @@ fn osd_elements(
     {
         state.hide_osd();
     }
-    let size = state.output_geometry(output).size;
+    let geo = state.output_geometry(output);
+    let size = geo.size;
     state.osd_image(scale, size);
-    let center =
-        |s: Size<i32, Logical>| Rectangle::new(Point::from(((size.w - s.w) / 2, (size.h - s.h) / 2)), s);
+    // Centré sur l'écran, ou sur le point demandé (taille d'une vue)
+    let at = state.osd_center().map(|c| c - geo.loc);
+    let center = move |s: Size<i32, Logical>| match at {
+        Some(c) => Rectangle::new(c - s.to_point().downscale(2), s),
+        None => Rectangle::new(Point::from(((size.w - s.w) / 2, (size.h - s.h) / 2)), s),
+    };
     let t = state.theme.osd.clone();
     let mut out = vec![];
     if let Some(o) = state.osd.as_mut() {
@@ -1106,7 +1221,10 @@ impl State {
     pub fn animating(&self) -> bool {
         let now = self.now();
         self.ghosts.iter().any(|g| !g.anim.done(now))
-            || self.views.iter().any(|v| v.appear.is_some())
+            || self
+                .views
+                .iter()
+                .any(|v| v.appear.is_some() || v.geom_anim.is_some() || v.shade_anim.is_some())
             || self.desk_anim.is_some()
             || self.menu_ghosts.iter().any(|g| !g.anim.done(now))
             || self
@@ -1118,6 +1236,9 @@ impl State {
                 .as_ref()
                 .is_some_and(|o| o.anim.is_some() || o.hide_at.is_some())
             || self.osd_ghost.is_some()
+            || self
+                .snap_shown
+                .is_some_and(|(_, a)| a.is_some_and(|a| !a.done(now)))
     }
 
     /// Fin d'une vue affichée (fermeture, réduction): sa dernière image

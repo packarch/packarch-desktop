@@ -128,6 +128,10 @@ pub struct State {
     pub us_keymap: Option<smithay::input::keyboard::xkb::Keymap>,
     /// Aperçu du collage pendant un déplacement (§ 8.6)
     pub snap_preview: Option<Rectangle<i32, Logical>>,
+    /// Contour d'un redimensionnement sans dessin du contenu (§ 8.7)
+    pub resize_outline: Option<Rectangle<i32, Logical>>,
+    /// Aperçu affiché et son animation
+    pub snap_shown: Option<(Rectangle<i32, Logical>, Option<crate::anim::Anim>)>,
     /// Défilement accumulé (pavé tactile) pour les liaisons de la molette
     pub scroll_acc: (f64, f64),
     /// Commandes de la session: variables d'environnement à leur passer
@@ -172,6 +176,8 @@ pub struct State {
     pub autostarted: bool,
     /// L'environnement a été exporté vers systemd et D-Bus
     pub env_exported: bool,
+    /// Raccourcis désactivés (ToggleKeybinds), sauf celui qui les rétablit
+    pub keybinds_off: bool,
     /// Curseurs du thème (session réelle)
     pub cursors: Option<crate::cursor::Cursors>,
     /// Horloge monotone (presentation-time)
@@ -308,6 +314,8 @@ impl State {
             suppressed_keys: vec![],
             us_keymap: us_keymap(),
             snap_preview: None,
+            snap_shown: None,
+            resize_outline: None,
             scroll_acc: (0.0, 0.0),
             child_env,
             env_vars: vec![],
@@ -339,6 +347,7 @@ impl State {
             },
             autostarted: false,
             env_exported: false,
+            keybinds_off: false,
         }
     }
 

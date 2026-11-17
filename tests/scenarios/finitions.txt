@@ -1,0 +1,103 @@
+# Version 1.0: actions de priorité 2 (§ 7.2), animations de maximisation,
+# d'enroulement et de l'aperçu du collage, taille pendant un
+# redimensionnement (popupShow). Lancé par tests/capture.sh.
+wait 1500
+spawn kitty --config NONE -o confirm_os_window_close=0 -o remember_window_size=no -o initial_window_width=500 -o initial_window_height=300 -T a -e sh -c 'sleep 120'
+wait-views 1 8000
+wait 800
+# Centrée (W-Down: AutoPlace center)
+combo 125 108
+wait 300
+# --- Bords de la zone utile (0 38 1280 724)
+action <action name="MoveToEdge" direction="left"/>
+action <action name="MoveToEdge" direction="up"/>
+wait 300
+mark a
+capture 01-coin.png
+action <action name="GrowToEdge" direction="right"/>
+wait 400
+expect-moved a 0 0
+action <action name="ShrinkToEdge" direction="right"/>
+wait 400
+action <action name="MoveTo" x="100" y="50"/>
+wait 300
+mark a
+action <action name="ResizeTo" width="400" height="200"/>
+wait 400
+expect-moved a 0 0
+action <action name="MoveToCursor"/>
+# --- Conditions
+action <action name="If"><query identifier="kit*"/><then><action name="Maximize"/></then><else><action name="Close"/></else></action>
+wait 500
+expect a 0 38 1280 724
+action <action name="If"><query title="zzz"/><then><action name="Close"/></then><else><action name="UnMaximize"/></else></action>
+wait 500
+expect-views 1
+spawn kitty --config NONE -o confirm_os_window_close=0 -T b -e sh -c 'sleep 120'
+wait-views 2 8000
+wait 600
+# Toutes les fenêtres kitty sur tous les bureaux, puis plus aucune
+action <action name="ForEach"><query identifier="kitty"/><then><action name="ToggleOmnipresent"/></then></action>
+combo 125 3
+wait 400
+expect-desktop 2
+expect-visible a yes
+expect-visible b yes
+combo 125 2
+wait 400
+action <action name="ForEach"><query identifier="kitty"/><then><action name="ToggleOmnipresent"/></then></action>
+# --- Raccourcis désactivés: W-a (maximiser) sans effet
+expect-focus b
+mark b
+action <action name="ToggleKeybinds"/>
+combo 125 16
+wait 400
+expect-moved b 0 0
+action <action name="ToggleKeybinds"/>
+# --- Animations à l'horloge simulée
+clock-freeze
+combo 125 16
+wait 150
+clock-advance 90
+wait 150
+capture 02-maximisation-mi-parcours.png
+clock-advance 200
+wait 150
+combo 125 16
+clock-advance 300
+wait 150
+# Enroulement (A-F7) à mi-parcours
+combo 56 65
+clock-advance 70
+wait 150
+capture 03-enroulement-mi-parcours.png
+clock-advance 200
+combo 56 65
+clock-advance 200
+clock-run
+wait 400
+# Taille affichée pendant un redimensionnement (popupShow Always), sur la
+# vue recentrée (W-Down)
+combo 125 108
+wait 400
+point b br
+press left
+move-by 30 20
+move-by 30 20
+wait 300
+capture 04-taille.png
+release left
+wait 400
+# Aperçu du collage à mi-apparition: déplacement jusqu'au bord gauche
+clock-freeze
+point b title
+press left
+move-by -20 0
+move 2 400
+clock-advance 60
+wait 150
+capture 05-apercu-collage.png
+clock-run
+release left
+wait 500
+quit

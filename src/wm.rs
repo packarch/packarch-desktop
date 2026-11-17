@@ -4,6 +4,7 @@
 
 use smithay::desktop::Window;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus, GrabStartData};
+use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size};
@@ -179,6 +180,92 @@ pub fn resist(
     loc
 }
 
+/// Arrêt d'un bord du cadre `f` poussé dans une direction: bord de la zone,
+/// ou bord d'une autre vue en face (recouvrement sur l'autre axe) rencontré
+/// avant
+pub fn edge_stop(
+    f: Rectangle<i32, Logical>,
+    zone: Rectangle<i32, Logical>,
+    dir: Edge,
+    others: &[Rectangle<i32, Logical>],
+) -> i32 {
+    let (l, t, r, b) = (f.loc.x, f.loc.y, f.loc.x + f.size.w, f.loc.y + f.size.h);
+    let vert = |o: &Rectangle<i32, Logical>| o.loc.y < b && o.loc.y + o.size.h > t;
+    let horiz = |o: &Rectangle<i32, Logical>| o.loc.x < r && o.loc.x + o.size.w > l;
+    match dir {
+        Edge::Left => others
+            .iter()
+            .filter(|o| vert(o) && o.loc.x + o.size.w <= l)
+            .map(|o| o.loc.x + o.size.w)
+            .fold(zone.loc.x, i32::max),
+        Edge::Right => others
+            .iter()
+            .filter(|o| vert(o) && o.loc.x >= r)
+            .map(|o| o.loc.x)
+            .fold(zone.loc.x + zone.size.w, i32::min),
+        Edge::Up => others
+            .iter()
+            .filter(|o| horiz(o) && o.loc.y + o.size.h <= t)
+            .map(|o| o.loc.y + o.size.h)
+            .fold(zone.loc.y, i32::max),
+        _ => others
+            .iter()
+            .filter(|o| horiz(o) && o.loc.y >= b)
+            .map(|o| o.loc.y)
+            .fold(zone.loc.y + zone.size.h, i32::min),
+    }
+}
+
+/// Rétrécit le cadre `f` par son bord `dir`: jusqu'au bord d'une autre vue
+/// à l'intérieur, sinon de moitié
+pub fn shrink_rect(
+    f: Rectangle<i32, Logical>,
+    dir: Edge,
+    others: &[Rectangle<i32, Logical>],
+) -> Rectangle<i32, Logical> {
+    let (l, t, r, b) = (f.loc.x, f.loc.y, f.loc.x + f.size.w, f.loc.y + f.size.h);
+    let min = 50;
+    let (l, t, r, b) = match dir {
+        Edge::Left => {
+            let x = others
+                .iter()
+                .flat_map(|o| [o.loc.x, o.loc.x + o.size.w])
+                .filter(|&x| x > l && x < r - min)
+                .min()
+                .unwrap_or(l + f.size.w / 2);
+            (x, t, r, b)
+        }
+        Edge::Right => {
+            let x = others
+                .iter()
+                .flat_map(|o| [o.loc.x, o.loc.x + o.size.w])
+                .filter(|&x| x < r && x > l + min)
+                .max()
+                .unwrap_or(r - f.size.w / 2);
+            (l, t, x, b)
+        }
+        Edge::Up => {
+            let y = others
+                .iter()
+                .flat_map(|o| [o.loc.y, o.loc.y + o.size.h])
+                .filter(|&y| y > t && y < b - min)
+                .min()
+                .unwrap_or(t + f.size.h / 2);
+            (l, y, r, b)
+        }
+        _ => {
+            let y = others
+                .iter()
+                .flat_map(|o| [o.loc.y, o.loc.y + o.size.h])
+                .filter(|&y| y < b && y > t + min)
+                .max()
+                .unwrap_or(b - f.size.h / 2);
+            (l, t, r, y)
+        }
+    };
+    Rectangle::new((l, t).into(), (r - l, b - t).into())
+}
+
 /// Bureau visé par GoToDesktop et SendToDesktop
 pub fn target_desktop(
     target: &DesktopTarget,
@@ -292,6 +379,9 @@ impl State {
     /// Envoie au client la taille et les états voulus
     pub fn configure(&mut self, i: usize, size: Option<Size<i32, Logical>>) {
         let tiling = self.views[i].tiling.clone();
+        if size.is_some() {
+            self.views[i].pending_size = size;
+        }
         // Fenêtre X11: états _NET_WM_STATE et géométrie globale
         if let Some(x) = self.views[i].x11().cloned() {
             let full = tiling == Tiling::Fullscreen;
@@ -361,6 +451,7 @@ impl State {
 
     /// Passe une vue à une géométrie imposée, en gardant l'ancienne
     fn set_tiling(&mut self, i: usize, tiling: Tiling, frame: Rectangle<i32, Logical>) {
+        let from = self.frame_rect(i);
         let current = self.views[i].tiling.clone();
         self.views[i].prev_tiling = match (&current, &tiling) {
             (Tiling::Edge(_) | Tiling::Region(_), Tiling::Maximized(_)) => Some(current.clone()),
@@ -374,6 +465,25 @@ impl State {
         self.views[i].shaded = false;
         self.views[i].tiling = tiling;
         self.fit_frame(i, frame);
+        self.start_geom_anim(i, from);
+    }
+
+    /// Animation du rectangle d'une vue (§ 10.5): de `from` au cadre que le
+    /// client va prendre
+    fn start_geom_anim(&mut self, i: usize, from: Rectangle<i32, Logical>) {
+        if !self.visible(&self.views[i]) || self.views[i].tiling == Tiling::Fullscreen {
+            self.views[i].geom_anim = None;
+            return;
+        }
+        let layout = self.layout(&self.views[i]);
+        let deco = layout.size - self.views[i].client_size();
+        let size = self.views[i].pending_size.unwrap_or(self.views[i].client_size());
+        let to = Rectangle::new(self.views[i].loc - layout.client.loc, size + deco);
+        let now = self.now();
+        self.views[i].geom_anim = (from != to)
+            .then(|| self.config.animations.start(crate::anim::Kind::Maximize, now))
+            .flatten()
+            .map(|a| (a, from, to));
     }
 
     /// Rend à une vue sa géométrie libre
@@ -381,6 +491,7 @@ impl State {
         if self.views[i].tiling == Tiling::None {
             return;
         }
+        let from = self.frame_rect(i);
         // Maximisée depuis un collage: elle y retourne
         if matches!(self.views[i].tiling, Tiling::Maximized(_) | Tiling::Fullscreen) {
             match self.views[i].prev_tiling.take() {
@@ -410,6 +521,7 @@ impl State {
             }
             None => self.configure(i, None),
         }
+        self.start_geom_anim(i, from);
     }
 
     pub fn maximize(&mut self, i: usize, axis: Axis) {
@@ -694,6 +806,44 @@ impl State {
             }
             Unfocus => self.set_keyboard_focus(Option::None),
             None => {}
+            ToggleKeybinds => {
+                self.keybinds_off = !self.keybinds_off;
+                info!(
+                    "raccourcis {}",
+                    if self.keybinds_off {
+                        "désactivés"
+                    } else {
+                        "réactivés"
+                    }
+                );
+            }
+            FocusOutput(target) => self.focus_output(target, i),
+            If {
+                queries,
+                then,
+                otherwise,
+            } => {
+                let ok = i.is_some_and(|i| queries.iter().any(|q| self.query_matches(q, i)));
+                let target = i.map(|i| self.views[i].window.clone());
+                self.run_actions(if ok { then } else { otherwise }, target, origin);
+            }
+            ForEach {
+                queries,
+                then,
+                otherwise,
+            } => {
+                let matching: Vec<Window> = (0..self.views.len())
+                    .filter(|&j| self.views[j].mapped && queries.iter().any(|q| self.query_matches(q, j)))
+                    .map(|j| self.views[j].window.clone())
+                    .collect();
+                if matching.is_empty() {
+                    let target = i.map(|i| self.views[i].window.clone());
+                    self.run_actions(otherwise, target, origin);
+                }
+                for w in matching {
+                    self.run_actions(then, Some(w), origin);
+                }
+            }
             _ => {
                 let Some(i) = i else { return };
                 self.run_view_action(action, i, origin);
@@ -733,11 +883,11 @@ impl State {
                 self.views[i].decorated = !self.views[i].decorated;
                 self.fit_frame(i, frame);
             }
-            Shade => self.views[i].shaded = self.views[i].tiling != Tiling::Fullscreen,
-            Unshade => self.views[i].shaded = false,
+            Shade => self.set_shaded(i, true),
+            Unshade => self.set_shaded(i, false),
             ToggleShade => {
                 let s = !self.views[i].shaded;
-                self.views[i].shaded = s && self.views[i].tiling != Tiling::Fullscreen;
+                self.set_shaded(i, s);
             }
             ToggleAlwaysOnTop => {
                 let v = &mut self.views[i];
@@ -784,6 +934,66 @@ impl State {
                 self.views[i].loc -= Point::from((*left, *top));
                 self.configure(i, Some(new));
             }
+            MoveToEdge {
+                direction,
+                snap_windows,
+            } => {
+                if self.views[i].tiling == Tiling::None {
+                    let f = self.frame_rect(i);
+                    let stop = self.edge_stop(i, f, *direction, *snap_windows);
+                    let mut loc = f.loc;
+                    match direction {
+                        Edge::Left => loc.x = stop,
+                        Edge::Right => loc.x = stop - f.size.w,
+                        Edge::Up => loc.y = stop,
+                        _ => loc.y = stop - f.size.h,
+                    }
+                    self.set_frame(i, Rectangle::new(loc, f.size));
+                }
+            }
+            GrowToEdge(direction) => {
+                if self.views[i].tiling == Tiling::None {
+                    let f = self.frame_rect(i);
+                    let stop = self.edge_stop(i, f, *direction, true);
+                    let (l, t, r, b) = (f.loc.x, f.loc.y, f.loc.x + f.size.w, f.loc.y + f.size.h);
+                    let (l, t, r, b) = match direction {
+                        Edge::Left => (stop.min(l), t, r, b),
+                        Edge::Right => (l, t, stop.max(r), b),
+                        Edge::Up => (l, stop.min(t), r, b),
+                        _ => (l, t, r, stop.max(b)),
+                    };
+                    self.set_frame(i, Rectangle::new((l, t).into(), (r - l, b - t).into()));
+                }
+            }
+            ShrinkToEdge(direction) => {
+                if self.views[i].tiling == Tiling::None {
+                    let f = self.frame_rect(i);
+                    let r = shrink_rect(f, *direction, &self.other_frames(i));
+                    self.set_frame(i, r);
+                }
+            }
+            MoveTo { x, y } => {
+                if self.views[i].tiling == Tiling::None {
+                    let zone = self.view_zone(i);
+                    let f = self.frame_rect(i);
+                    self.set_frame(i, Rectangle::new(zone.loc + Point::from((*x, *y)), f.size));
+                }
+            }
+            ResizeTo { width, height } => {
+                if self.views[i].tiling == Tiling::None {
+                    let size = self.views[i].window.geometry().size;
+                    let w = if *width > 0 { *width } else { size.w };
+                    let h = if *height > 0 { *height } else { size.h };
+                    self.configure(i, Some(Size::from((w, h))));
+                }
+            }
+            MoveToCursor => {
+                if self.views[i].tiling == Tiling::None {
+                    self.place(i, Placement::Cursor);
+                    self.configure(i, Option::None);
+                }
+            }
+            MoveToOutput(target) => self.move_to_output(i, target),
             SnapToEdge(edge) => self.snap_to_edge(i, *edge),
             UnSnap => {
                 if matches!(self.views[i].tiling, Tiling::Edge(_) | Tiling::Region(_)) {
@@ -811,6 +1021,161 @@ impl State {
             }
             _ => {}
         }
+    }
+
+    /// Enroule ou déroule une vue, avec l'animation de sa hauteur (§ 10.5)
+    pub fn set_shaded(&mut self, i: usize, shaded: bool) {
+        let shaded = shaded && self.views[i].tiling != Tiling::Fullscreen;
+        if self.views[i].shaded == shaded {
+            return;
+        }
+        let now = self.now();
+        let anim = self
+            .visible(&self.views[i])
+            .then(|| self.config.animations.start(crate::anim::Kind::Shade, now))
+            .flatten();
+        let full = if shaded { self.views[i].last.clone() } else { None };
+        self.views[i].shade_anim = anim.map(|a| (a, shaded, full));
+        self.views[i].shaded = shaded;
+    }
+
+    /// Place le cadre d'une vue libre dans un rectangle
+    fn set_frame(&mut self, i: usize, frame: Rectangle<i32, Logical>) {
+        let layout = self.layout(&self.views[i]);
+        let deco = layout.size - self.views[i].client_size();
+        self.views[i].loc = frame.loc + layout.client.loc;
+        let size = Size::from(((frame.size.w - deco.w).max(1), (frame.size.h - deco.h).max(1)));
+        let current = self.views[i].window.geometry().size;
+        self.configure(i, (size != current).then_some(size));
+    }
+
+    /// Coordonnée où s'arrête un bord poussé dans une direction: bord de la
+    /// zone utile, ou (`windows`) bord d'une autre vue rencontrée avant
+    fn edge_stop(&self, i: usize, f: Rectangle<i32, Logical>, dir: Edge, windows: bool) -> i32 {
+        let zone = self.view_zone(i);
+        let others = if windows { self.other_frames(i) } else { vec![] };
+        edge_stop(f, zone, dir, &others)
+    }
+
+    /// Écran visé par un nom ou une direction, depuis un point
+    fn find_output(
+        &self,
+        target: &crate::actions::OutputTarget,
+        from: Point<f64, Logical>,
+    ) -> Option<Output> {
+        use crate::actions::OutputTarget;
+        match target {
+            OutputTarget::Name(n) => self.outputs.iter().find(|o| o.name() == *n).cloned(),
+            OutputTarget::Direction(d) => {
+                let here = self.output_at(from)?;
+                let c = |o: &Output| {
+                    let g = self.output_geometry(o).to_f64();
+                    g.loc + g.size.to_point().downscale(2.0)
+                };
+                let start = c(&here);
+                self.outputs
+                    .iter()
+                    .filter(|o| **o != here)
+                    .filter(|o| {
+                        let p = c(o);
+                        match d {
+                            Edge::Left => p.x < start.x,
+                            Edge::Right => p.x > start.x,
+                            Edge::Up => p.y < start.y,
+                            _ => p.y > start.y,
+                        }
+                    })
+                    .min_by(|a, b| {
+                        let da = c(a) - start;
+                        let db = c(b) - start;
+                        da.x.hypot(da.y).total_cmp(&db.x.hypot(db.y))
+                    })
+                    .cloned()
+            }
+        }
+    }
+
+    /// Pointeur au centre d'un écran, focus à sa vue la plus en avant
+    fn focus_output(&mut self, target: &crate::actions::OutputTarget, i: Option<usize>) {
+        let from = i
+            .map(|i| {
+                let f = self.frame_rect(i).to_f64();
+                f.loc + f.size.to_point().downscale(2.0)
+            })
+            .unwrap_or(self.pointer);
+        let Some(output) = self.find_output(target, from) else {
+            return;
+        };
+        let g = self.output_geometry(&output);
+        let center = g.loc.to_f64() + g.size.to_f64().to_point().downscale(2.0);
+        let time = self.start.elapsed().as_millis() as u32;
+        self.pointer_motion(center, time);
+        let top = self.stacking().into_iter().rev().find(|&j| {
+            g.to_f64().contains({
+                let f = self.frame_rect(j).to_f64();
+                f.loc + f.size.to_point().downscale(2.0)
+            })
+        });
+        match top {
+            Some(j) => {
+                self.focus_view(j, false);
+            }
+            Option::None => self.set_keyboard_focus(Option::None),
+        }
+    }
+
+    /// Envoie une vue sur un autre écran, même position relative; une vue
+    /// imposée y reprend sa géométrie
+    fn move_to_output(&mut self, i: usize, target: &crate::actions::OutputTarget) {
+        let f = self.frame_rect(i);
+        let center = f.loc.to_f64() + f.size.to_f64().to_point().downscale(2.0);
+        let (Some(src), Some(dst)) = (self.output_at(center), self.find_output(target, center)) else {
+            return;
+        };
+        if src == dst {
+            return;
+        }
+        let (a, b) = (self.usable_area(&src), self.usable_area(&dst));
+        let rel = f.loc - a.loc;
+        let x = (b.loc.x + rel.x).clamp(b.loc.x, b.loc.x + (b.size.w - f.size.w).max(0));
+        let y = (b.loc.y + rel.y).clamp(b.loc.y, b.loc.y + (b.size.h - f.size.h).max(0));
+        let shift = Point::from((x, y)) - f.loc;
+        self.views[i].loc += shift;
+        if let Some(saved) = self.views[i].saved.as_mut() {
+            saved.loc += shift;
+        }
+        match self.views[i].tiling.clone() {
+            Tiling::Maximized(a) => self.maximize(i, a),
+            Tiling::Edge(e) => self.snap_to_edge(i, e),
+            Tiling::Region(r) => self.snap_to_region(i, &r),
+            Tiling::Fullscreen => {
+                let g = self.output_geometry(&dst);
+                self.views[i].loc = g.loc;
+                self.configure(i, Some(g.size));
+            }
+            Tiling::None => self.configure(i, Option::None),
+        }
+    }
+
+    /// Une requête `If`/`ForEach` correspond-elle à la vue `i`
+    fn query_matches(&self, q: &crate::actions::Query, i: usize) -> bool {
+        use crate::actions::DesktopQuery;
+        use crate::config::wildcard;
+        let v = &self.views[i];
+        let eq = |want: Option<bool>, got: bool| want.is_none_or(|w| w == got);
+        q.identifier.as_deref().is_none_or(|p| wildcard(p, &v.app_id()))
+            && q.title.as_deref().is_none_or(|p| wildcard(p, &v.title()))
+            && eq(q.maximized, matches!(v.tiling, Tiling::Maximized(_)))
+            && eq(q.iconified, v.minimized)
+            && eq(q.focused, self.focused_view() == Some(i))
+            && eq(q.omnipresent, v.omnipresent)
+            && eq(q.shaded, v.shaded)
+            && eq(q.fullscreen, v.tiling == Tiling::Fullscreen)
+            && match &q.desktop {
+                Option::None => true,
+                Some(DesktopQuery::Current) => v.on_desktop(self.desktop),
+                Some(DesktopQuery::Index(d)) => v.omnipresent || v.desktop == *d,
+            }
     }
 
     /// Déplacement interactif: depuis la souris (glisser) ou le clavier
@@ -910,6 +1275,7 @@ impl State {
             edges,
             initial_size: size,
             keyboard: origin.button.is_none(),
+            pending: None,
         };
         pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
     }
@@ -1079,6 +1445,27 @@ mod tests {
             resist(rect(190, 150, 300, 100), zone, 20, &[other], 20),
             Point::from((200, 150))
         );
+    }
+
+    #[test]
+    fn edges_and_shrink() {
+        let zone = rect(0, 0, 1000, 800);
+        let f = rect(400, 300, 200, 100);
+        let other = rect(100, 320, 100, 50);
+        // À gauche: s'arrête contre l'autre vue, sinon au bord de la zone
+        assert_eq!(edge_stop(f, zone, Edge::Left, &[other]), 200);
+        assert_eq!(edge_stop(f, zone, Edge::Left, &[]), 0);
+        assert_eq!(edge_stop(f, zone, Edge::Right, &[other]), 1000);
+        // Vue sans recouvrement vertical: ignorée
+        assert_eq!(edge_stop(f, zone, Edge::Left, &[rect(100, 0, 100, 50)]), 0);
+        assert_eq!(edge_stop(f, zone, Edge::Down, &[]), 800);
+        // Rétrécir par la droite: de moitié, ou jusqu'à une vue à l'intérieur
+        assert_eq!(shrink_rect(f, Edge::Right, &[]), rect(400, 300, 100, 100));
+        assert_eq!(
+            shrink_rect(f, Edge::Right, &[rect(520, 0, 10, 10)]),
+            rect(400, 300, 130, 100)
+        );
+        assert_eq!(shrink_rect(f, Edge::Up, &[]), rect(400, 350, 200, 50));
     }
 
     #[test]

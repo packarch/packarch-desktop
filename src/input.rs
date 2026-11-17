@@ -389,6 +389,7 @@ impl State {
             // Verrouillé: seulement les raccourcis allowWhenLocked
             let bind = find_keybind(&st.config.keybinds, Mods::from_state(mods), &translated, physical)
                 .filter(|b| !locked || b.allow_when_locked)
+                .filter(|b| !st.keybinds_off || b.actions.contains(&Action::ToggleKeybinds))
                 .map(|b| b.actions.clone());
             if menu_open && !locked {
                 // Menu ouvert: les touches lui reviennent, sauf les
@@ -844,6 +845,113 @@ pub struct ResizeGrab {
     pub edges: Edges,
     pub initial_size: Size<i32, Logical>,
     pub keyboard: bool,
+    /// Taille voulue, appliquée à la fin si seul le contour est dessiné
+    pub pending: Option<Size<i32, Logical>>,
+}
+
+impl ResizeGrab {
+    /// Taille voulue pour un déplacement `d` du pointeur, dans les limites
+    /// du client
+    fn wanted(&self, d: Point<i32, Logical>) -> Size<i32, Logical> {
+        let mut w = self.initial_size.w;
+        let mut h = self.initial_size.h;
+        if self.edges.left {
+            w -= d.x;
+        } else if self.edges.right {
+            w += d.x;
+        }
+        if self.edges.top {
+            h -= d.y;
+        } else if self.edges.bottom {
+            h += d.y;
+        }
+        let (min, max) = if let Some(x) = self.window.x11_surface() {
+            (x.min_size().unwrap_or_default(), x.max_size().unwrap_or_default())
+        } else if let Some(t) = self.window.toplevel() {
+            smithay::wayland::compositor::with_states(t.wl_surface(), |s| {
+                let mut cached = s
+                    .cached_state
+                    .get::<smithay::wayland::shell::xdg::SurfaceCachedState>();
+                let c = cached.current();
+                (c.min_size, c.max_size)
+            })
+        } else {
+            (Size::default(), Size::default())
+        };
+        let clamp = |v: i32, lo: i32, hi: i32| {
+            let v = v.max(lo.max(1));
+            if hi > 0 { v.min(hi) } else { v }
+        };
+        Size::from((clamp(w, min.w, max.w), clamp(h, min.h, max.h)))
+    }
+
+    /// Envoie la taille au client (X11: taille et position tout de suite)
+    fn apply(&self, data: &mut State, size: Size<i32, Logical>) {
+        if let Some(x) = self.window.x11_surface() {
+            if let Some(i) = data.window_index(&self.window) {
+                let mut loc = data.views[i].loc;
+                if self.edges.left {
+                    loc.x += data.views[i].window.geometry().size.w - size.w;
+                }
+                if self.edges.top {
+                    loc.y += data.views[i].window.geometry().size.h - size.h;
+                }
+                data.views[i].loc = loc;
+                let _ = x.configure(smithay::utils::Rectangle::new(loc, size));
+            }
+            return;
+        }
+        let Some(toplevel) = self.window.toplevel() else {
+            return;
+        };
+        toplevel.with_pending_state(|s| s.size = Some(size));
+        if let Some(serial) = toplevel.send_pending_configure()
+            && let Some(i) = data.window_index(&self.window)
+            && let Some(r) = data.views[i].resize.as_mut()
+        {
+            r.last_serial = Some(serial);
+        }
+    }
+
+    /// Cadre qu'aurait la vue à cette taille (le bord opposé reste fixe)
+    fn frame_for(
+        &self,
+        data: &State,
+        i: usize,
+        size: Size<i32, Logical>,
+    ) -> smithay::utils::Rectangle<i32, Logical> {
+        let layout = data.layout(&data.views[i]);
+        let deco = layout.size - data.views[i].client_size();
+        let (loc0, size0) = data.views[i]
+            .resize
+            .map(|r| (r.initial_loc, r.initial_size))
+            .unwrap_or((data.views[i].loc, self.initial_size));
+        let mut loc = loc0;
+        if self.edges.left {
+            loc.x += size0.w - size.w;
+        }
+        if self.edges.top {
+            loc.y += size0.h - size.h;
+        }
+        smithay::utils::Rectangle::new(loc - layout.client.loc, size + deco)
+    }
+
+    /// Taille affichée pendant le geste (§ 8.7, popupShow): en caractères
+    /// pour un client X11 qui donne un pas de redimensionnement
+    fn size_text(&self, data: &State, size: Size<i32, Logical>) -> Option<String> {
+        use crate::config::PopupShow;
+        let hints = self.window.x11_surface().and_then(|x| x.size_hints());
+        let steps = hints.and_then(|h| {
+            let (iw, ih) = h.size_increment.filter(|(a, b)| *a > 1 || *b > 1)?;
+            let (bw, bh) = h.base_size.or(h.min_size).unwrap_or((0, 0));
+            Some(((size.w - bw) / iw.max(1), (size.h - bh) / ih.max(1)))
+        });
+        match (data.config.resize_popup, steps) {
+            (PopupShow::Never, _) | (PopupShow::Nonpixel, None) => None,
+            (_, Some((c, r))) => Some(format!("{c} × {r}")),
+            (PopupShow::Always, None) => Some(format!("{} × {}", size.w, size.h)),
+        }
+    }
 }
 
 /// Méthodes communes aux deux gestes: tout est transmis tel quel, sauf le
@@ -972,6 +1080,8 @@ impl PointerGrab<State> for MoveGrab {
             let before = data.frame_rect(i);
             let saved = data.views[i].saved;
             data.restore(i);
+            // Sous le pointeur tout de suite, sans animation
+            data.views[i].geom_anim = None;
             if let Some(saved) = saved {
                 let layout = data.layout(&data.views[i]);
                 let frame_w = saved.size.w + layout.size.w - layout.client.size.w;
@@ -1016,6 +1126,14 @@ impl PointerGrab<State> for MoveGrab {
             data.config.top_maximize,
         );
         data.snap_preview = self.snap.map(|e| edge_rect(zone_here, e, data.config.gap));
+        // Nouveau rectangle: son animation commence maintenant
+        if data.snap_preview != data.snap_shown.map(|(r, _)| r) {
+            let now = data.now();
+            data.snap_shown = data.snap_preview.map(|r| {
+                let anim = data.config.animations.start(crate::anim::Kind::SnapPreview, now);
+                (r, anim)
+            });
+        }
     }
 
     fn button(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, event: &ButtonEvent) {
@@ -1053,57 +1171,21 @@ impl PointerGrab<State> for ResizeGrab {
         handle.motion(data, None, event);
         data.pointer = event.location;
         let d = (event.location - self.start.location).to_i32_round::<i32>();
-        let mut w = self.initial_size.w;
-        let mut h = self.initial_size.h;
-        if self.edges.left {
-            w -= d.x;
-        } else if self.edges.right {
-            w += d.x;
-        }
-        if self.edges.top {
-            h -= d.y;
-        } else if self.edges.bottom {
-            h += d.y;
-        }
-        let clamp = |v: i32, lo: i32, hi: i32| {
-            let v = v.max(lo.max(1));
-            if hi > 0 { v.min(hi) } else { v }
-        };
-        // Fenêtre X11: taille et position appliquées tout de suite
-        if let Some(x) = self.window.x11_surface() {
-            let min = x.min_size().unwrap_or_default();
-            let max = x.max_size().unwrap_or_default();
-            let size: Size<i32, Logical> = Size::from((clamp(w, min.w, max.w), clamp(h, min.h, max.h)));
-            if let Some(i) = data.window_index(&self.window) {
-                let mut loc = data.views[i].loc;
-                if self.edges.left {
-                    loc.x += data.views[i].window.geometry().size.w - size.w;
-                }
-                if self.edges.top {
-                    loc.y += data.views[i].window.geometry().size.h - size.h;
-                }
-                data.views[i].loc = loc;
-                let _ = x.configure(smithay::utils::Rectangle::new(loc, size));
-            }
-            return;
-        }
-        let Some(toplevel) = self.window.toplevel() else {
+        let size = self.wanted(d);
+        let Some(i) = data.window_index(&self.window) else {
             return;
         };
-        let (min, max) = smithay::wayland::compositor::with_states(toplevel.wl_surface(), |s| {
-            let mut cached = s
-                .cached_state
-                .get::<smithay::wayland::shell::xdg::SurfaceCachedState>();
-            let c = cached.current();
-            (c.min_size, c.max_size)
-        });
-        let size = Size::from((clamp(w, min.w, max.w), clamp(h, min.h, max.h)));
-        toplevel.with_pending_state(|s| s.size = Some(size));
-        if let Some(serial) = toplevel.send_pending_configure()
-            && let Some(i) = data.window_index(&self.window)
-            && let Some(r) = data.views[i].resize.as_mut()
-        {
-            r.last_serial = Some(serial);
+        let frame = self.frame_for(data, i, size);
+        if data.config.resize_draw_contents {
+            self.apply(data, size);
+        } else {
+            // drawContents=no: seulement le contour, taille appliquée à la fin
+            self.pending = Some(size);
+            data.resize_outline = Some(frame);
+        }
+        if let Some(text) = self.size_text(data, size) {
+            let center = frame.loc + frame.size.to_point().downscale(2);
+            data.show_size_osd(text, center);
         }
     }
 
@@ -1114,6 +1196,11 @@ impl PointerGrab<State> for ResizeGrab {
         if grab_ends(self.keyboard, self.start.button, handle, event) {
             handle.unset_grab(self, data, event.serial, event.time, true);
             data.cursor_status = CursorImageStatus::default_named();
+            if let Some(size) = self.pending.take() {
+                self.apply(data, size);
+            }
+            data.resize_outline = None;
+            data.hide_size_osd();
             let serial = self.window.toplevel().and_then(|toplevel| {
                 toplevel.with_pending_state(|s| s.states.unset(xdg_toplevel::State::Resizing));
                 toplevel.send_pending_configure()

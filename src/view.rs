@@ -99,6 +99,13 @@ pub struct View {
     /// Surface Wayland de la vue (celle d'une fenêtre X11 est connue après
     /// son association par xwayland-shell)
     surface: WlSurface,
+    /// Dernière taille demandée au client
+    pub pending_size: Option<Size<i32, Logical>>,
+    /// Animation du rectangle (maximisation, collage): de, vers
+    pub geom_anim: Option<(Anim, Rectangle<i32, Logical>, Rectangle<i32, Logical>)>,
+    /// Enroulement en cours: animation, sens (vrai: s'enroule), dernière
+    /// image déroulée
+    pub shade_anim: Option<(Anim, bool, Option<Snapshot>)>,
     /// Règles de fenêtre (§ 8.5)
     pub skip_taskbar: bool,
     pub skip_switcher: bool,
@@ -110,6 +117,9 @@ impl View {
         View {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             surface,
+            pending_size: None,
+            shade_anim: None,
+            geom_anim: None,
             skip_taskbar: false,
             skip_switcher: false,
             fixed_position: false,

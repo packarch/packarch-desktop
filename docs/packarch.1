@@ -1,0 +1,297 @@
+.\" SPDX-License-Identifier: MIT OR Apache-2.0
+.TH PACKARCH 1 "novembre 2026" "packarch 1.0" "Commandes"
+.SH NOM
+packarch \- compositeur Wayland à fenêtres flottantes de Packarch
+.SH SYNOPSIS
+.B packarch
+.RI [ options ]
+.br
+.B packarch
+.BR \-\-reconfigure " | " \-\-exit
+.SH DESCRIPTION
+.B packarch
+est le bureau de Packarch : un compositeur Wayland à fenêtres flottantes
+qui dessine lui\-même le cadre des fenêtres (thèmes Openbox, coins arrondis,
+ombres), ses menus et ses affichages (liste Alt+Tab, nom du bureau), avec
+des animations sobres. Sa configuration reprend le format d'Openbox :
+.IR rc.xml ,
+.IR menu.xml ,
+.IR themerc .
+.PP
+Les applications X11 fonctionnent par XWayland. Les outils Wayland
+habituels (waybar, rofi, mako, swaybg, swayidle, hyprlock, grim,
+wlr\-randr, wlopm, wl\-clipboard) sont pris en charge.
+.SH OPTIONS
+.TP
+.BI \-C ", " \-\-config\-dir " DOSSIER"
+Dossier de configuration (par défaut
+.IR ~/.config/packarch ,
+puis
+.IR /etc/xdg/packarch ).
+.TP
+.BI \-s ", " \-\-startup " COMMANDE"
+Commande lancée au démarrage, après
+.IR autostart .
+Peut être répétée.
+.TP
+.BR \-r ", " \-\-reconfigure
+Demande à l'instance en cours de relire sa configuration.
+.TP
+.BR \-e ", " \-\-exit
+Demande à l'instance en cours de quitter.
+.TP
+.BR \-d ", " \-\-debug
+Journal détaillé.
+.TP
+.BR \-v ", " \-\-version
+Version.
+.TP
+.BI \-\-backend " udev|winit|headless"
+.B udev
+pour une session sur une console,
+.B winit
+pour une fenêtre dans une session graphique,
+.B headless
+sans écran (essais). Par défaut :
+.B winit
+si
+.B WAYLAND_DISPLAY
+ou
+.B DISPLAY
+est défini,
+.B udev
+sinon.
+.TP
+.B \-\-no\-animations
+Désactive les animations.
+.SH FICHIERS
+Dans le dossier de configuration :
+.TP
+.I rc.xml
+Réglages (voir
+.BR CONFIGURATION ).
+Racine
+.BR <packarch_config> ;
+.B <openbox_config>
+et
+.B <labwc_config>
+sont aussi acceptées. Un élément inconnu est ignoré avec un avertissement
+dans le journal ; une erreur de syntaxe au rechargement garde l'ancienne
+configuration.
+.TP
+.I menu.xml
+Menus au format Openbox :
+.BR <menu\ id= "..." "\ label=" "..." "\ icon=" ... > ,
+.BR <item\ label= ... > ,
+.BR <separator\ label= ... /> ,
+et les pipemenus
+.BR <menu\ execute= "commande" > ,
+dont la commande est relancée à chaque ouverture (5 s au plus). Le menu
+.B root\-menu
+est fourni s'il manque ;
+.B client\-menu
+(menu de fenêtre) et
+.B client\-list\-combined\-menu
+(fenêtres par bureau) sont générés s'ils ne sont pas définis. Un
+.B _
+avant une lettre d'un libellé en fait l'accélérateur.
+.TP
+.I environment
+Variables
+.IR NOM = valeur ,
+une par ligne, pour les programmes lancés.
+.BR XKB_DEFAULT_LAYOUT ,
+.BR XKB_DEFAULT_VARIANT ,
+.B XKB_DEFAULT_OPTIONS
+règlent le clavier,
+.B XCURSOR_THEME
+et
+.B XCURSOR_SIZE
+le curseur.
+.TP
+.I autostart
+Script lancé une fois au démarrage, quand XWayland est prêt.
+.TP
+.I shutdown
+Script lancé avant la fin de la session (5 s au plus).
+.TP
+.I themerc\-override
+Clés de thème qui remplacent celles du thème choisi.
+.PP
+Le thème
+.B theme/name
+est cherché dans
+.IR $XDG_DATA_HOME/themes ,
+.IR ~/.themes ,
+puis
+.IR /usr/share/themes ,
+fichier
+.I packarch/themerc
+ou
+.IR openbox\-3/themerc .
+.SH CONFIGURATION
+Sections de
+.IR rc.xml :
+.TP
+.B core
+.BR decoration " (server, client), " gap ", " xwaylandPersistence .
+.TP
+.B placement
+.BR policy " (automatic, cursor, center)."
+.TP
+.B theme
+.BR name ", " icon ", " titlebar/layout " (par exemple " :iconify,max,close "), "
+.BR titlebar/showTitle ", " cornerRadius ", " keepBorder ", " dropShadows ", "
+.BR dropShadowsOnTiled ", " font\ place= "ActiveWindow|InactiveWindow|MenuHeader|MenuItem|OnScreenDisplay."
+.TP
+.B margin
+.BR top ", " bottom ", " left ", " right .
+.TP
+.B windowSwitcher
+Attributs
+.BR preview ", " outlines ;
+.BR osd\ show= "yes|no ;"
+.B fields/field
+.RB content= "icon|desktop_entry_name|title|identifier|workspace " et " width " en %.
+.TP
+.B resistance
+.BR screenEdgeStrength ", " windowEdgeStrength .
+.TP
+.B resize
+.BR popupShow " (Never, Always, Nonpixel), " drawContents .
+.TP
+.B focus
+.BR followMouse ", " raiseOnFocus .
+.TP
+.B snapping
+.BR range\ inner= ... "\ outer=" ... ", " topMaximize .
+.TP
+.B desktops
+.BR popupTime " (ms), " names/name .
+.TP
+.B regions
+.BR region\ name= "...\ x=... y=... width=... height=... (en %)."
+.TP
+.B keyboard
+.BR numlock ", " repeatRate ", " repeatDelay ", "
+.BR keybind\ key= "W-S-Return " allowWhenLocked= "yes|no "
+contenant des
+.BR <action> .
+Modificateurs :
+.BR W " (Super), " A " (Alt), " C " (Ctrl), " S " (Maj), " M " (AltGr), " H " (Hyper)."
+Sur un clavier AZERTY, un raccourci écrit avec un chiffre marche sans Maj.
+.TP
+.B mouse
+.BR doubleClickTime ", " context\ name= ...
+contenant des
+.BR mousebind\ button= "W-Left " action= "Press|Release|Click|DoubleClick|Drag"
+ou
+.BR direction= "Up|Down|Left|Right " action= "Scroll."
+Contextes :
+.BR Frame ", " Client ", " Title ", " TitleBar ", " Border " (et " Top ", " Bottom ", "
+.BR Left ", " Right ", " TLCorner "...), " Iconify ", " Maximize ", " Close ", " Shade ", "
+.BR AllDesktops ", " Root .
+.TP
+.B libinput
+.BR device\ category= "default|touchpad|non-touch :"
+.BR tap ", " naturalScroll ", " middleEmulation ", " disableWhileTyping ", "
+.BR leftHanded ", " pointerSpeed ", " accelProfile ", " scrollMethod .
+.TP
+.B windowRules
+.BR windowRule\ identifier= "...\ title=... "
+(jokers
+.BR * " et " ? ),
+attributs
+.BR serverDecoration ", " skipTaskbar ", " skipWindowSwitcher ", " fixedPosition ,
+et des actions exécutées à l'apparition de la fenêtre.
+.TP
+.B menu
+.BR showIcons .
+.TP
+.B animations
+Attributs
+.BR enabled " et " speed
+(multiplie les durées), puis un élément par animation :
+.BR window\-open ", " window\-close ", " minimize ", " maximize ", " menu ", "
+.BR osd ", " workspace\-switch ", " snap\-preview ", " shade ,
+avec
+.BR enabled ", " duration " (ms) et " curve
+.RB ( ease\-out\-cubic ", " linear ", " ease\-in\-out\-cubic ", " spring ,
+ce dernier avec
+.BR stiffness " et " damping ).
+.SH ACTIONS
+.BR <action\ name= "Nom"
+.IR attributs .../>
+.TP
+Fenêtres
+.BR Focus ", " Raise ", " Lower ", " Close ", " Kill ", " Iconify ", "
+.BR Maximize ", " UnMaximize ", " ToggleMaximize " (direction=both|horizontal|vertical), "
+.BR ToggleFullscreen ", " ToggleDecorations ", " Shade ", " Unshade ", " ToggleShade ", "
+.BR ToggleAlwaysOnTop ", " ToggleAlwaysOnBottom ", " ToggleOmnipresent .
+.TP
+Géométrie
+.BR Move ", " Resize ", " MoveRelative " (x, y), " ResizeRelative " (left, right, top, bottom), "
+.BR MoveTo " (x, y), " ResizeTo " (width, height), " MoveToCursor ", "
+.BR MoveToEdge " (direction, snapWindows), " GrowToEdge ", " ShrinkToEdge " (direction), "
+.BR SnapToEdge " (direction=left|right|up|down|center), " UnSnap ", "
+.BR SnapToRegion " (region), " AutoPlace " (policy)."
+.TP
+Bureaux et écrans
+.BR GoToDesktop " (to=1..n|left|right|last, wrap), "
+.BR SendToDesktop " (to, follow, wrap), " ToggleShowDesktop ", "
+.BR FocusOutput ", " MoveToOutput " (output=nom ou direction)."
+.TP
+Divers
+.BR Execute " (command), " ShowMenu " (menu, atCursor), " NextWindow ", "
+.BR PreviousWindow ", " ToggleKeybinds ", " Reconfigure ", " Exit ", " None .
+.TP
+Conditions
+.BR If " et " ForEach
+contiennent des
+.BR <query>
+.RB ( identifier ", " title ", " maximized ", " iconified ", " focused ", "
+.BR omnipresent ", " shaded ", " fullscreen ", " desktop ),
+un
+.B <then>
+et un
+.B <else>
+contenant des actions.
+.B ForEach
+exécute
+.B <then>
+pour chaque fenêtre qui correspond.
+.SH TOUCHES FIXES
+.TP
+.B Ctrl+Alt+F1...F12
+Change de console (session sur console).
+.TP
+.B Super+Échap
+Rend les raccourcis quand une application les a inhibés (machine
+virtuelle, bureau à distance).
+.TP
+.B Échap
+Pendant Alt+Tab : revient à la fenêtre de départ. Dans un menu : le ferme.
+.SH ENVIRONNEMENT
+Les programmes lancés reçoivent
+.BR WAYLAND_DISPLAY ", " DISPLAY " (XWayland), " XDG_CURRENT_DESKTOP=packarch:wlroots ", "
+.BR XDG_SESSION_TYPE=wayland " et " PACKARCH_PID .
+Sur une console, ces variables sont aussi envoyées à systemd et D\-Bus,
+sauf si une autre session graphique du même utilisateur est active.
+.B RUST_LOG
+règle le journal, écrit sur la sortie d'erreur.
+.SH SIGNAUX
+.TP
+.B SIGHUP
+Relit la configuration.
+.TP
+.BR SIGTERM ", " SIGINT
+Quitte proprement.
+.SH VOIR AUSSI
+.BR waybar (5),
+.BR hyprlock (1),
+.BR swayidle (1),
+.BR grim (1),
+.BR wlr\-randr (1),
+.BR wlopm (1).
+.PP
+Le cahier des charges du projet décrit le comportement attendu en détail.

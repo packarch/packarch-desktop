@@ -72,6 +72,143 @@ pub enum Action {
     Exit,
     AutoPlace(Option<Placement>),
     None,
+    // Priorité 2 (§ 7.2)
+    /// Jusqu'au bord de la zone utile, ou d'une autre vue (`snapWindows`)
+    MoveToEdge {
+        direction: Edge,
+        snap_windows: bool,
+    },
+    GrowToEdge(Edge),
+    ShrinkToEdge(Edge),
+    /// Position du cadre, relative à la zone utile de l'écran de la vue
+    MoveTo {
+        x: i32,
+        y: i32,
+    },
+    /// Taille du client
+    ResizeTo {
+        width: i32,
+        height: i32,
+    },
+    MoveToCursor,
+    ToggleKeybinds,
+    FocusOutput(OutputTarget),
+    MoveToOutput(OutputTarget),
+    /// Actions selon l'état de la vue: `then` si une requête correspond
+    If {
+        queries: Vec<Query>,
+        then: Vec<Action>,
+        otherwise: Vec<Action>,
+    },
+    /// `then` pour chaque vue qui correspond, `otherwise` si aucune
+    ForEach {
+        queries: Vec<Query>,
+        then: Vec<Action>,
+        otherwise: Vec<Action>,
+    },
+}
+
+/// Écran visé: par son nom, ou dans une direction depuis l'écran courant
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutputTarget {
+    Name(String),
+    Direction(Edge),
+}
+
+/// Critères d'une requête `If`/`ForEach`; tous ceux donnés doivent
+/// correspondre
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Query {
+    pub identifier: Option<String>,
+    pub title: Option<String>,
+    pub maximized: Option<bool>,
+    pub iconified: Option<bool>,
+    pub focused: Option<bool>,
+    pub omnipresent: Option<bool>,
+    pub shaded: Option<bool>,
+    pub fullscreen: Option<bool>,
+    /// Bureau (à partir de 0), ou `current`
+    pub desktop: Option<DesktopQuery>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopQuery {
+    Index(usize),
+    Current,
+}
+
+fn edge(v: Option<&str>, what: &str) -> Result<Edge, String> {
+    Ok(match v.map(str::to_ascii_lowercase).as_deref() {
+        Some("left") => Edge::Left,
+        Some("right") => Edge::Right,
+        Some("up") => Edge::Up,
+        Some("down") => Edge::Down,
+        v => return Err(format!("{what}: direction inconnue: {v:?}")),
+    })
+}
+
+fn query(node: roxmltree::Node) -> Result<Query, String> {
+    let a = Attrs { node };
+    let b = |name: &str| -> Result<Option<bool>, String> {
+        match a.get(name) {
+            Option::None => Ok(Option::None),
+            Some(v) => parse_bool(v)
+                .map(Some)
+                .ok_or_else(|| format!("{name}: booléen attendu, pas « {v} »")),
+        }
+    };
+    Ok(Query {
+        identifier: a.get("identifier").map(str::to_string),
+        title: a.get("title").map(str::to_string),
+        maximized: b("maximized")?,
+        iconified: b("iconified")?,
+        focused: b("focused")?,
+        omnipresent: b("omnipresent")?,
+        shaded: b("shaded")?,
+        fullscreen: b("fullscreen")?,
+        desktop: match a.get("desktop") {
+            Option::None => Option::None,
+            Some(v) if v.eq_ignore_ascii_case("current") => Some(DesktopQuery::Current),
+            Some(v) => match v.parse::<usize>() {
+                Ok(n) if n >= 1 => Some(DesktopQuery::Index(n - 1)),
+                _ => return Err(format!("desktop: numéro ou « current » attendu, pas « {v} »")),
+            },
+        },
+    })
+}
+
+/// Actions d'un élément enfant (`<then>`, `<else>`): une erreur de l'une
+/// d'elles rend toute l'action invalide
+fn branch(node: roxmltree::Node, name: &str) -> Result<Vec<Action>, String> {
+    let Some(child) = node
+        .children()
+        .find(|c| c.is_element() && c.tag_name().name().eq_ignore_ascii_case(name))
+    else {
+        return Ok(vec![]);
+    };
+    let mut warnings = vec![];
+    let actions = parse_children(child, &mut warnings);
+    if warnings.is_empty() {
+        Ok(actions)
+    } else {
+        Err(warnings.join("; "))
+    }
+}
+
+/// `If` et `ForEach`: requêtes (`<query>`, ou attributs de l'action
+/// elle-même), `<then>` et `<else>`
+fn conditional(node: roxmltree::Node) -> Result<(Vec<Query>, Vec<Action>, Vec<Action>), String> {
+    let mut queries = vec![];
+    for q in node
+        .children()
+        .filter(|c| c.is_element() && c.tag_name().name().eq_ignore_ascii_case("query"))
+    {
+        queries.push(query(q)?);
+    }
+    if queries.is_empty() {
+        queries.push(query(node)?);
+    }
+    Ok((queries, branch(node, "then")?, branch(node, "else")?))
 }
 
 /// Attributs d'un élément `<action>` (ou de ses enfants, à la Openbox:
@@ -219,6 +356,50 @@ pub fn parse(node: roxmltree::Node) -> Result<Action, String> {
             }
         }),
         "none" => None,
+        "movetoedge" => MoveToEdge {
+            direction: edge(a.get("direction"), "MoveToEdge")?,
+            snap_windows: a.bool("snapWindows", true)?,
+        },
+        "growtoedge" => GrowToEdge(edge(a.get("direction"), "GrowToEdge")?),
+        "shrinktoedge" => ShrinkToEdge(edge(a.get("direction"), "ShrinkToEdge")?),
+        "moveto" => MoveTo {
+            x: a.int("x")?,
+            y: a.int("y")?,
+        },
+        "resizeto" => ResizeTo {
+            width: a.int("width")?,
+            height: a.int("height")?,
+        },
+        "movetocursor" => MoveToCursor,
+        "togglekeybinds" => ToggleKeybinds,
+        "focusoutput" | "movetooutput" => {
+            let target = match (a.get("output"), a.get("direction")) {
+                (Some(o), _) => OutputTarget::Name(o.to_string()),
+                (Option::None, d @ Some(_)) => OutputTarget::Direction(edge(d, name)?),
+                _ => return Err(format!("{name}: attribut output ou direction attendu")),
+            };
+            if name.eq_ignore_ascii_case("focusoutput") {
+                FocusOutput(target)
+            } else {
+                MoveToOutput(target)
+            }
+        }
+        "if" => {
+            let (queries, then, otherwise) = conditional(node)?;
+            If {
+                queries,
+                then,
+                otherwise,
+            }
+        }
+        "foreach" => {
+            let (queries, then, otherwise) = conditional(node)?;
+            ForEach {
+                queries,
+                then,
+                otherwise,
+            }
+        }
         _ => return Err(format!("action inconnue ou pas encore prise en charge: {name}")),
     })
 }
@@ -294,6 +475,35 @@ mod tests {
             act(r#"<action name="AutoPlace" policy="center"/>"#),
             Ok(Action::AutoPlace(Some(Placement::Center)))
         );
+        assert_eq!(
+            act(r#"<action name="MoveToEdge" direction="left" snapWindows="no"/>"#),
+            Ok(Action::MoveToEdge {
+                direction: Edge::Left,
+                snap_windows: false
+            })
+        );
+        assert_eq!(
+            act(r#"<action name="MoveToOutput" direction="right"/>"#),
+            Ok(Action::MoveToOutput(OutputTarget::Direction(Edge::Right)))
+        );
+        let a = act(
+            r#"<action name="If"><query identifier="kitty" maximized="yes"/><query title="Thèmes*"/>
+               <then><action name="Close"/></then><else><action name="Maximize"/></else></action>"#,
+        )
+        .unwrap();
+        let Action::If {
+            queries,
+            then,
+            otherwise,
+        } = a
+        else {
+            panic!()
+        };
+        assert_eq!(queries.len(), 2);
+        assert_eq!(queries[0].maximized, Some(true));
+        assert_eq!(then, vec![Action::Close]);
+        assert_eq!(otherwise, vec![Action::Maximize(Axis::Both)]);
+        assert!(act(r#"<action name="If"><then><action name="Vole"/></then></action>"#).is_err());
         assert!(act(r#"<action name="Vole"/>"#).is_err());
         assert!(act(r#"<action name="GoToDesktop" to="0"/>"#).is_err());
     }

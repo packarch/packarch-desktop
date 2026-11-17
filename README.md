@@ -6,27 +6,26 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : **version 0.5** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
-§ 14). Fenêtres décorées par le compositeur (thème Openbox, coins arrondis,
-ombres), couches layer-shell, `rc.xml` complet pour les réglages de Packarch
-(raccourcis en AZERTY, souris, bureaux, collage, régions, règles de
-fenêtres, rechargement), menus de `menu.xml` arrondis et ombrés avec
-pipemenus, animations.
+État : **version 1.0** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+§ 14, et la page de manuel [docs/packarch.1](docs/packarch.1) :
+`man -l docs/packarch.1`).
 
-Session réelle (backend udev : DRM/KMS, libseat, libinput, plusieurs
-écrans, branchement à chaud, Ctrl+Alt+F1…F12) ; liste Alt+Tab et nom du
-bureau à l'écran ; protocoles du quotidien : verrouillage (hyprlock),
-inactivité (swayidle), barre des tâches et bureaux de waybar, capture
-(grim), wlr-randr, wlopm, presse-papiers des outils, activation, méthodes
-de saisie, contraintes du pointeur, bacs à sable (security-context).
+- Fenêtres décorées par le compositeur (thèmes Openbox, coins arrondis,
+  ombres), couches layer-shell, XWayland.
+- `rc.xml` complet : raccourcis (AZERTY), souris, bureaux, collage, régions,
+  règles de fenêtres, toutes les actions de priorité 1 et 2 (`If`,
+  `ForEach`, `MoveToEdge`, `MoveToOutput`…), rechargement.
+- Menus de `menu.xml` arrondis et ombrés, pipemenus, menu de fenêtre, liste
+  des fenêtres ; liste Alt+Tab, nom du bureau, taille pendant un
+  redimensionnement.
+- Animations : fenêtres (ouverture, fermeture, réduction, maximisation,
+  collage, enroulement), menus, OSD, bureaux, aperçu du collage.
+- Session réelle (DRM/KMS, libseat, libinput, plusieurs écrans) ;
+  verrouillage, inactivité, barre des tâches et bureaux de waybar, capture,
+  wlr-randr, wlopm, presse-papiers des outils, portails.
 
-XWayland : applications X11 décorées comme les autres, menus et bulles X11,
-focus clavier X, presse-papiers partagé, `_NET_WM_STATE`, dialogues centrés
-sur leur parent. Fichiers d'intégration (session, portails) dans
-[data/](data/).
-
-Pas encore : animations de maximisation, d'enroulement et de collage ;
-priorité 2 des actions (1.0).
+Pas encore : loupe (`ZoomIn`/`ZoomOut`, priorité 3), quarts d'écran
+(`SnapToEdge combine="yes"`), XWayland lancé à la première connexion X11.
 
 ## Essayer
 

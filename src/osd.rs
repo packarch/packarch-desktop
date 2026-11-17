@@ -27,6 +27,8 @@ const PAD: i32 = 8;
 pub enum OsdKind {
     Switcher,
     Desktop(String),
+    /// Taille pendant un redimensionnement, centrée sur ce point
+    Size(String, smithay::utils::Point<i32, Logical>),
 }
 
 pub struct OsdImage {
@@ -101,6 +103,34 @@ impl State {
         });
     }
 
+    /// Taille de la vue pendant un redimensionnement (§ 8.7)
+    pub fn show_size_osd(&mut self, text: String, center: smithay::utils::Point<i32, Logical>) {
+        if matches!(self.osd.as_ref().map(|o| &o.kind), Some(OsdKind::Switcher)) {
+            return;
+        }
+        let image = self.osd.take().and_then(|o| o.image);
+        self.osd = Some(Osd {
+            kind: OsdKind::Size(text, center),
+            anim: None,
+            hide_at: None,
+            image,
+        });
+    }
+
+    pub fn hide_size_osd(&mut self) {
+        if matches!(self.osd.as_ref().map(|o| &o.kind), Some(OsdKind::Size(..))) {
+            self.osd = None;
+        }
+    }
+
+    /// Centre demandé pour l'OSD (taille), en coordonnées globales
+    pub fn osd_center(&self) -> Option<smithay::utils::Point<i32, Logical>> {
+        match self.osd.as_ref().map(|o| &o.kind) {
+            Some(OsdKind::Size(_, c)) => Some(*c),
+            _ => None,
+        }
+    }
+
     /// Liste Alt+Tab
     pub fn show_switcher(&mut self) {
         if !self.config.switcher.show {
@@ -167,7 +197,7 @@ impl State {
         };
         let (rows, selected) = match kind {
             OsdKind::Switcher => self.switcher_rows(),
-            OsdKind::Desktop(_) => (vec![], 0),
+            OsdKind::Desktop(_) | OsdKind::Size(..) => (vec![], 0),
         };
         let mut h = DefaultHasher::new();
         kind.hash_key(&mut h);
@@ -186,7 +216,8 @@ impl State {
         }
         let drawn = match &kind {
             OsdKind::Switcher => self.draw_switcher(&rows, selected, scale, screen),
-            OsdKind::Desktop(name) => self.draw_desktop(name, scale),
+            OsdKind::Desktop(name) => self.draw_desktop(name, scale, 1.6),
+            OsdKind::Size(text, _) => self.draw_desktop(text, scale, 1.0),
         };
         let Some((pm, size)) = drawn else { return };
         let (w, hh) = (pm.width() as i32, pm.height() as i32);
@@ -229,9 +260,10 @@ impl State {
         }
     }
 
-    fn draw_desktop(&mut self, name: &str, scale: f64) -> Option<(Pixmap, Size<i32, Logical>)> {
+    /// Texte seul dans un cadre (nom du bureau, taille)
+    fn draw_desktop(&mut self, name: &str, scale: f64, grow: f32) -> Option<(Pixmap, Size<i32, Logical>)> {
         let font = Font {
-            size: self.config.font_osd.size * 1.6,
+            size: self.config.font_osd.size * grow,
             ..self.config.font_osd.clone()
         };
         let t = self.theme.osd.clone();
@@ -350,7 +382,7 @@ impl OsdKind {
     fn hash_key(&self, h: &mut DefaultHasher) {
         match self {
             OsdKind::Switcher => 0u8.hash(h),
-            OsdKind::Desktop(n) => n.hash(h),
+            OsdKind::Desktop(n) | OsdKind::Size(n, _) => n.hash(h),
         }
     }
 }

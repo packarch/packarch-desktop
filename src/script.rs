@@ -35,6 +35,8 @@
 //! expect-file a.png 2000 attend qu'un fichier existe (2 s au plus)
 //! expect-locked yes      vérifie le verrouillage de la session
 //! expect-views 2         vérifie le nombre de vues affichées
+//! action <action name="MoveToEdge" direction="left"/>
+//!                        exécute une action sur la vue active
 //! clock-freeze           arrête l'horloge des animations
 //! clock-advance 50       l'avance de 50 ms
 //! clock-run              la remet en marche
@@ -83,6 +85,7 @@ pub enum Step {
     ExpectFile(PathBuf, u64),
     ExpectLocked(bool),
     ExpectViews(usize),
+    Action(crate::actions::Action),
     ClockFreeze,
     ClockAdvance(u64),
     ClockRun,
@@ -206,6 +209,10 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                     Step::ExpectFile(PathBuf::from(path), t)
                 }
                 "expect-views" => Step::ExpectViews(num(args.next())? as usize),
+                "action" => {
+                    let doc = roxmltree::Document::parse(rest).map_err(|e| e.to_string())?;
+                    Step::Action(crate::actions::parse(doc.root_element())?)
+                }
                 "expect-locked" => Step::ExpectLocked(
                     crate::config::parse_bool(args.next().unwrap_or("")).ok_or("yes ou no")?,
                 ),
@@ -475,6 +482,14 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                         fail(state, format!("fichier absent: {}", path.display()));
                     }
                     waiting_since = None;
+                }
+                Step::Action(a) => {
+                    let target = state.focused_view().map(|i| state.views[i].window.clone());
+                    let origin = crate::wm::Origin {
+                        button: None,
+                        location: state.pointer,
+                    };
+                    state.run_actions(&[a], target, origin);
                 }
                 Step::ExpectViews(n) => {
                     let got = state.views.iter().filter(|v| v.mapped).count();
