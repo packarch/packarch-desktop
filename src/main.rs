@@ -9,15 +9,19 @@
 
 mod actions;
 mod anim;
+mod apps;
 mod backend;
 mod bindings;
 mod config;
+mod cursor;
 mod deco;
 mod env;
 mod handlers;
 mod icons;
 mod input;
 mod menu;
+mod osd;
+mod protocols;
 mod render;
 mod script;
 mod session;
@@ -38,6 +42,7 @@ use crate::state::State;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum BackendKind {
+    Udev,
     Winit,
     Headless,
 }
@@ -61,9 +66,10 @@ struct Cli {
     /// Journal détaillé
     #[arg(short, long)]
     debug: bool,
-    /// Backend (udev: version 0.4)
-    #[arg(long, value_enum, default_value = "winit")]
-    backend: BackendKind,
+    /// Backend: udev sur une console, winit dans une session graphique
+    /// (par défaut selon WAYLAND_DISPLAY et DISPLAY)
+    #[arg(long, value_enum)]
+    backend: Option<BackendKind>,
     /// Taille de l'écran headless, LARGEURxHAUTEUR
     #[arg(long, hide = true, default_value = "1280x800")]
     size: String,
@@ -128,7 +134,14 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         state.config.animations.enabled = false;
     }
 
-    match cli.backend {
+    let nested = std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
+    let kind = cli.backend.unwrap_or(if nested {
+        BackendKind::Winit
+    } else {
+        BackendKind::Udev
+    });
+    match kind {
+        BackendKind::Udev => backend::udev::init(&mut event_loop, &mut state)?,
         BackendKind::Winit => backend::winit::init(&mut event_loop, &mut state, cli.scale)?,
         BackendKind::Headless => {
             let (w, h) = cli

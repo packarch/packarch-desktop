@@ -679,7 +679,7 @@ packarch [OPTIONS]
   -e, --exit                 demande à l'instance en cours de quitter
   -v, --version              version (avec le commit git)
   -d, --debug                journal détaillé
-      --backend udev|winit|headless
+      --backend udev|winit|headless   (par défaut : winit dans une session graphique, udev sinon)
       --no-animations            désactive les animations (§ 10.5)
 ```
 
@@ -738,5 +738,13 @@ Décidé le 17 novembre 2026 :
    négatif laisse un espace ; `menu.overlap.y` les décale vers le bas.
    Valeurs par défaut des clés de menu absentes du thème : bordure
    `border.width`, marges 7 × 4 px, largeur 20 à 200 px, rayon 6 px.
+6. Session réelle : seul le GPU principal dessine ; les écrans sont posés
+   côte à côte de gauche à droite à l'échelle 1, puis réglés par
+   wlr-randr ou kanshi (wlr-output-management). Le choix du backend par
+   défaut suit l'environnement : `winit` si `WAYLAND_DISPLAY` ou `DISPLAY`
+   est défini, `udev` sinon.
+7. Alt+Tab : Échap revient à la vue de départ. Colonne
+   `desktop_entry_name` : nom du fichier `.desktop` correspondant à
+   l'identifiant de la vue (nom traduit selon `LANG`).
 
 Aucune question ouverte pour l'instant.

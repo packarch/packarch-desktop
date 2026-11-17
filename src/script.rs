@@ -30,6 +30,8 @@
 //! expect-menu root-menu prefs   vérifie les menus ouverts (none: aucun)
 //! wait-menu 2 5000       attend 2 menus ouverts (pipemenus, 5 s au plus)
 //! point-menu Terminal    pointeur sur l'entrée de ce libellé
+//! expect-file a.png 2000 attend qu'un fichier existe (2 s au plus)
+//! expect-locked yes      vérifie le verrouillage de la session
 //! clock-freeze           arrête l'horloge des animations
 //! clock-advance 50       l'avance de 50 ms
 //! clock-run              la remet en marche
@@ -74,6 +76,8 @@ pub enum Step {
     ExpectMenu(Vec<String>),
     WaitMenu(usize, u64),
     PointMenu(String),
+    ExpectFile(PathBuf, u64),
+    ExpectLocked(bool),
     ClockFreeze,
     ClockAdvance(u64),
     ClockRun,
@@ -186,6 +190,14 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                     Step::WaitMenu(n, t)
                 }
                 "point-menu" => Step::PointMenu(rest.to_string()),
+                "expect-file" => {
+                    let path = args.next().ok_or("expect-file FICHIER [ms]")?;
+                    let t = args.next().map(|s| s.parse().unwrap_or(3000)).unwrap_or(3000);
+                    Step::ExpectFile(PathBuf::from(path), t)
+                }
+                "expect-locked" => Step::ExpectLocked(
+                    crate::config::parse_bool(args.next().unwrap_or("")).ok_or("yes ou no")?,
+                ),
                 "clock-freeze" => Step::ClockFreeze,
                 "clock-advance" => Step::ClockAdvance(num(args.next())? as u64),
                 "clock-run" => Step::ClockRun,
@@ -412,6 +424,25 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                     Some(p) => state.pointer_motion(p, state.start.elapsed().as_millis() as u32),
                     None => fail(state, format!("pas d'entrée « {label} » dans les menus ouverts")),
                 },
+                Step::ExpectFile(path, timeout) => {
+                    let start = *waiting_since.get_or_insert_with(Instant::now);
+                    let ok = std::fs::metadata(&path).is_ok();
+                    if !ok && start.elapsed() < Duration::from_millis(timeout) {
+                        return TimeoutAction::ToDuration(Duration::from_millis(50));
+                    }
+                    if !ok {
+                        fail(state, format!("fichier absent: {}", path.display()));
+                    }
+                    waiting_since = None;
+                }
+                Step::ExpectLocked(b) => {
+                    if state.is_locked() != b {
+                        fail(
+                            state,
+                            format!("verrouillée: {} au lieu de {b}", state.is_locked()),
+                        );
+                    }
+                }
                 Step::ClockFreeze => state.clock.frozen = Some(state.now()),
                 Step::ClockAdvance(ms) => {
                     let now = state.now();

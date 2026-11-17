@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Backends (cahier des charges § 4.3): winit (fenêtre imbriquée) et
-//! headless (sans écran, pour les tests et les captures). udev: 0.4.
+//! headless (sans écran, pour les tests et les captures), udev (session
+//! réelle).
 
 pub mod headless;
+pub mod udev;
 pub mod winit;
 
 use std::time::Duration;
@@ -22,6 +24,7 @@ use crate::state::State;
 pub enum Backend {
     Winit(winit::Winit),
     Headless(headless::Headless),
+    Udev(Box<udev::Udev>),
 }
 
 impl Backend {
@@ -29,6 +32,7 @@ impl Backend {
         match self {
             Backend::Winit(w) => w.backend.renderer(),
             Backend::Headless(h) => &mut h.renderer,
+            Backend::Udev(u) => &mut u.renderer,
         }
     }
 }
@@ -58,9 +62,38 @@ pub fn init_renderer(state: &mut State, renderer: &mut GlesRenderer) {
     state.dmabuf = Some((dmabuf_state, global));
 }
 
-/// Après un rendu: rappels de trame, ménage
+/// Après un rendu: rappels de trame, retours de présentation, barres des
+/// tâches et bureaux, ménage
 pub fn after_render(state: &mut State, output: &Output) {
     let time = state.start.elapsed();
+    state.confirm_lock();
+    let mut feedback = smithay::desktop::utils::OutputPresentationFeedback::new(output);
+    for view in &state.views {
+        if view.mapped {
+            view.window.take_presentation_feedback(
+                &mut feedback,
+                |_, _| Some(output.clone()),
+                |_, _| smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind::empty(),
+            );
+        }
+    }
+    let refresh = output
+        .current_mode()
+        .map(|m| {
+            smithay::wayland::presentation::Refresh::fixed(Duration::from_secs_f64(
+                1000.0 / m.refresh.max(1) as f64,
+            ))
+        })
+        .unwrap_or(smithay::wayland::presentation::Refresh::Unknown);
+    feedback.presented(
+        state.monotonic.now(),
+        refresh,
+        0,
+        smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind::Vsync,
+    );
+    state.refresh_toplevels();
+    state.refresh_workspaces();
+    state.refresh_output_tools();
     let throttle = Some(Duration::from_secs(1));
     for view in &state.views {
         if view.mapped {
@@ -77,6 +110,11 @@ pub fn after_render(state: &mut State, output: &Output) {
     layer_map_for_output(output).cleanup();
     for view in &state.views {
         view.window.refresh();
+    }
+    for (_, l) in &state.lock_surfaces {
+        smithay::desktop::utils::send_frames_surface_tree(l.wl_surface(), output, time, throttle, |_, _| {
+            Some(output.clone())
+        });
     }
     state.popups.cleanup();
     let _ = state.dh.flush_clients();

@@ -803,19 +803,25 @@ impl State {
     }
 
     /// Toutes les fenêtres, par bureau (§ 5.5)
-    fn client_list_menu(&self) -> Menu {
+    fn client_list_menu(&mut self) -> Menu {
         let mut entries = vec![];
-        for (d, name) in self.config.desktop_names.iter().enumerate() {
+        let names = self.config.desktop_names.clone();
+        for (d, name) in names.iter().enumerate() {
             entries.push(Entry::Separator(Some(name.clone())));
             let mut any = false;
-            for v in self.views.iter().filter(|v| v.mapped && v.desktop == d) {
+            let ids: Vec<usize> = (0..self.views.len())
+                .filter(|&i| self.views[i].mapped && self.views[i].desktop == d)
+                .collect();
+            for i in ids {
+                let icon = self.apps.get(&self.views[i].app_id()).and_then(|a| a.icon);
+                let v = &self.views[i];
                 let title = v.title();
                 let title = if title.is_empty() { v.app_id() } else { title };
                 let title = if v.minimized { format!("({title})") } else { title };
                 let app_id = v.app_id();
                 entries.push(Entry::Item {
                     label: Label::plain(&title),
-                    icon: (!app_id.is_empty()).then_some(app_id),
+                    icon: icon.or_else(|| (!app_id.is_empty()).then_some(app_id)),
                     actions: vec![Action::Focus, Action::Raise],
                     target: Some(v.window.clone()),
                     checked: false,

@@ -59,7 +59,12 @@ pub enum Stack {
     Top,
 }
 
+/// Prochain identifiant de vue
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 pub struct View {
+    /// Identifiant stable (protocoles de barre des tâches)
+    pub id: u64,
     pub window: Window,
     /// Coin haut gauche de la géométrie du client, coordonnées globales
     pub loc: Point<i32, Logical>,
@@ -86,11 +91,14 @@ pub struct View {
     pub last: Option<Snapshot>,
     /// Animation d'apparition en cours
     pub appear: Option<(Anim, Appear)>,
+    /// Activation demandée sans jeton valide (§ 8.1)
+    pub urgent: bool,
 }
 
 impl View {
     pub fn new(window: Window, desktop: usize) -> View {
         View {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             window,
             loc: Point::from((0, 0)),
             mapped: false,
@@ -110,6 +118,7 @@ impl View {
             deco: None,
             last: None,
             appear: None,
+            urgent: false,
         }
     }
 

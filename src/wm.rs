@@ -516,9 +516,17 @@ impl State {
         if d == self.desktop || d >= self.config.desktop_names.len() {
             return;
         }
+        let now = self.now();
+        let from = self.desktop;
+        self.desk_anim = self
+            .config
+            .animations
+            .start(crate::anim::Kind::WorkspaceSwitch, now)
+            .map(|a| (a, from));
         self.last_desktop = self.desktop;
         self.desktop = d;
         self.show_desktop = false;
+        self.show_desktop_osd();
         info!("bureau {}", self.config.desktop_names[d]);
         let keep = self.focused_view().filter(|&i| self.views[i].omnipresent);
         if keep.is_none() {
@@ -563,6 +571,7 @@ impl State {
                 return;
             }
             self.cycle = Some(Cycle { windows, index: 0 });
+            self.show_switcher();
         }
         let cycle = self.cycle.as_mut().unwrap();
         let n = cycle.windows.len();
@@ -579,10 +588,30 @@ impl State {
 
     /// Fin d'Alt+Tab: la vue choisie devient la plus récente
     pub fn end_cycle(&mut self) {
+        if matches!(
+            self.osd.as_ref().map(|o| &o.kind),
+            Some(crate::osd::OsdKind::Switcher)
+        ) {
+            self.hide_osd();
+        }
         if let Some(c) = self.cycle.take() {
             let w = c.windows[c.index].clone();
             self.mru.retain(|x| *x != w);
             self.mru.insert(0, w);
+        }
+    }
+
+    /// Échap pendant Alt+Tab: retour à la vue de départ
+    pub fn cancel_cycle(&mut self) {
+        let Some(c) = self.cycle.take() else { return };
+        if matches!(
+            self.osd.as_ref().map(|o| &o.kind),
+            Some(crate::osd::OsdKind::Switcher)
+        ) {
+            self.hide_osd();
+        }
+        if let Some(i) = c.windows.first().and_then(|w| self.window_index(w)) {
+            self.focus_view(i, true);
         }
     }
 
@@ -888,6 +917,7 @@ impl State {
         self.theme = Theme::load(&self.config);
         self.close_menus();
         self.reload_menus();
+        self.apps.clear();
         for v in &mut self.views {
             v.deco = None;
         }

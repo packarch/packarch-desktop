@@ -5,11 +5,12 @@
 use std::time::Instant;
 
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent, KeyState,
-    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GestureBeginEvent, GestureEndEvent,
+    GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState,
+    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
 };
 use smithay::desktop::Window;
-use smithay::input::keyboard::{FilterResult, Keycode, Keysym};
+use smithay::input::keyboard::{FilterResult, Keycode, Keysym, keysyms};
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
     GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
@@ -75,6 +76,9 @@ enum KeyResult {
     Bind(Vec<Action>),
     /// Touche pour le menu ouvert, et le raccourci qu'elle déclencherait
     Menu(Keysym, Option<char>, Option<Vec<Action>>),
+    CancelCycle,
+    /// Ctrl+Alt+Fn: console n
+    Vt(i32),
 }
 
 fn is_modifier(sym: Keysym) -> bool {
@@ -182,6 +186,97 @@ impl State {
                 let pos = event.position_transformed(geo.size) + geo.loc.to_f64();
                 self.pointer_motion(pos, event.time_msec());
             }
+            InputEvent::GestureSwipeBegin { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_swipe_begin(
+                    self,
+                    &GestureSwipeBeginEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        fingers: event.fingers(),
+                    },
+                );
+            }
+            InputEvent::GestureSwipeUpdate { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_swipe_update(
+                    self,
+                    &GestureSwipeUpdateEvent {
+                        time: event.time_msec(),
+                        delta: event.delta(),
+                    },
+                );
+            }
+            InputEvent::GestureSwipeEnd { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_swipe_end(
+                    self,
+                    &GestureSwipeEndEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        cancelled: event.cancelled(),
+                    },
+                );
+            }
+            InputEvent::GesturePinchBegin { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_pinch_begin(
+                    self,
+                    &GesturePinchBeginEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        fingers: event.fingers(),
+                    },
+                );
+            }
+            InputEvent::GesturePinchUpdate { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_pinch_update(
+                    self,
+                    &GesturePinchUpdateEvent {
+                        time: event.time_msec(),
+                        delta: event.delta(),
+                        scale: event.scale(),
+                        rotation: event.rotation(),
+                    },
+                );
+            }
+            InputEvent::GesturePinchEnd { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_pinch_end(
+                    self,
+                    &GesturePinchEndEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        cancelled: event.cancelled(),
+                    },
+                );
+            }
+            InputEvent::GestureHoldBegin { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_hold_begin(
+                    self,
+                    &GestureHoldBeginEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        fingers: event.fingers(),
+                    },
+                );
+            }
+            InputEvent::GestureHoldEnd { event } => {
+                let p = self.seat.get_pointer().unwrap();
+                p.gesture_hold_end(
+                    self,
+                    &GestureHoldEndEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        cancelled: event.cancelled(),
+                    },
+                );
+            }
+            InputEvent::PointerMotion { event } => {
+                self.pointer_relative(event.delta(), event.delta_unaccel(), event.time());
+            }
             InputEvent::PointerButton { event } => {
                 let pressed = event.state() == ButtonState::Pressed;
                 self.pointer_button(event.button_code(), pressed, event.time_msec());
@@ -230,8 +325,19 @@ impl State {
         } else {
             KeyState::Released
         };
+        self.activity();
         let serial = SERIAL_COUNTER.next_serial();
         let menu_open = self.menu.is_some();
+        let cycling = self.cycle.is_some();
+        let locked = self.is_locked();
+        // Raccourcis inhibés par le client (machines virtuelles): seul
+        // Super+Échap reste, pour lever l'inhibition
+        let inhibitor = {
+            use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat;
+            self.focused_surface()
+                .and_then(|f| self.seat.keyboard_shortcuts_inhibitor_for_surface(&f))
+                .filter(|i| i.is_active())
+        };
         let result = keyboard.input(self, code, state, serial, time, |st, mods, handle| {
             if !pressed {
                 if let Some(pos) = st.suppressed_keys.iter().position(|k| *k == code) {
@@ -246,9 +352,31 @@ impl State {
                 .us_keymap
                 .as_ref()
                 .and_then(|k| k.key_get_syms_by_level(code, 0, 0).first().copied());
+            if let Some(inhibitor) = &inhibitor {
+                let m = Mods::from_state(mods);
+                let escape = handle.modified_sym() == Keysym::Escape;
+                if escape && m.logo && !m.alt && !m.ctrl && !m.shift {
+                    inhibitor.inactivate();
+                    st.suppressed_keys.push(code);
+                    return FilterResult::Intercept(None);
+                }
+                return FilterResult::Forward;
+            }
+            let raw = handle.modified_sym().raw();
+            if (keysyms::KEY_XF86Switch_VT_1..=keysyms::KEY_XF86Switch_VT_12).contains(&raw) {
+                st.suppressed_keys.push(code);
+                let vt = (raw - keysyms::KEY_XF86Switch_VT_1 + 1) as i32;
+                return FilterResult::Intercept(Some(KeyResult::Vt(vt)));
+            }
+            if cycling && handle.modified_sym() == Keysym::Escape {
+                st.suppressed_keys.push(code);
+                return FilterResult::Intercept(Some(KeyResult::CancelCycle));
+            }
+            // Verrouillé: seulement les raccourcis allowWhenLocked
             let bind = find_keybind(&st.config.keybinds, Mods::from_state(mods), &translated, physical)
+                .filter(|b| !locked || b.allow_when_locked)
                 .map(|b| b.actions.clone());
-            if menu_open {
+            if menu_open && !locked {
                 // Menu ouvert: les touches lui reviennent, sauf les
                 // modificateurs; un raccourci ferme le menu
                 let sym = handle.modified_sym();
@@ -268,6 +396,14 @@ impl State {
         });
         let actions = match result {
             Some(Some(KeyResult::Bind(actions))) => Some(actions),
+            Some(Some(KeyResult::Vt(vt))) => {
+                self.change_vt(vt);
+                None
+            }
+            Some(Some(KeyResult::CancelCycle)) => {
+                self.cancel_cycle();
+                None
+            }
             Some(Some(KeyResult::Menu(sym, ch, bind))) => {
                 let nav = is_menu_key(sym);
                 // Le raccourci du menu ouvert le referme
@@ -306,6 +442,10 @@ impl State {
     }
 
     pub fn pointer_motion(&mut self, pos: Point<f64, Logical>, time: u32) {
+        self.activity();
+        let Some(pos) = self.constrain(pos) else {
+            return;
+        };
         self.pointer = pos;
         let under = self.under(pos);
         // Survol des boutons du cadre
@@ -390,6 +530,12 @@ impl State {
             forward(self);
             return;
         };
+        self.activity();
+        // Verrouillé: tout va à la surface de verrouillage
+        if self.is_locked() {
+            forward(self);
+            return;
+        }
         if pressed {
             // Menu ouvert ou geste en cours: l'appui leur revient
             if pointer.is_grabbed() || self.press.is_some() {
@@ -515,8 +661,9 @@ impl State {
     /// Molette: liaisons Scroll, sinon transmise au client. `steps`: crans
     /// horizontaux et verticaux (positifs vers la droite et le bas)
     pub fn pointer_axis(&mut self, frame: AxisFrame, steps: (f64, f64)) {
+        self.activity();
         let pointer = self.seat.get_pointer().unwrap();
-        if !pointer.is_grabbed() {
+        if !pointer.is_grabbed() && !self.is_locked() {
             let (ctxs, view) = contexts(&self.under(self.pointer));
             let mods = self.mods();
             let any = [ScrollDir::Up, ScrollDir::Down, ScrollDir::Left, ScrollDir::Right]
@@ -562,6 +709,67 @@ impl State {
         }
         pointer.axis(self, frame);
         pointer.frame(self);
+    }
+}
+
+impl State {
+    /// Mouvement relatif (souris, pavé tactile): le pointeur reste sur les
+    /// écrans; le mouvement brut va aussi aux clients (relative-pointer)
+    pub fn pointer_relative(&mut self, delta: Point<f64, Logical>, unaccel: Point<f64, Logical>, utime: u64) {
+        let pointer = self.seat.get_pointer().unwrap();
+        let focus = match self.under(self.pointer) {
+            Under::View(_, s, loc) | Under::Layer(s, loc, _) => Some((s, loc)),
+            _ => None,
+        };
+        pointer.relative_motion(
+            self,
+            focus,
+            &RelativeMotionEvent {
+                delta,
+                delta_unaccel: unaccel,
+                utime,
+            },
+        );
+        let mut pos = self.pointer + delta;
+        if !self
+            .outputs
+            .iter()
+            .any(|o| self.output_geometry(o).to_f64().contains(pos))
+            && let Some(o) = self.output_at(self.pointer)
+        {
+            let g = self.output_geometry(&o).to_f64();
+            pos.x = pos.x.clamp(g.loc.x, g.loc.x + g.size.w - 1.0);
+            pos.y = pos.y.clamp(g.loc.y, g.loc.y + g.size.h - 1.0);
+        }
+        self.pointer_motion(pos, (utime / 1000) as u32);
+    }
+
+    /// Contraintes du pointeur (pointer-constraints, jeux): `None` si le
+    /// pointeur est bloqué; confiné, il reste sur la surface
+    fn constrain(&mut self, pos: Point<f64, Logical>) -> Option<Point<f64, Logical>> {
+        use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
+        let pointer = self.seat.get_pointer()?;
+        let Some(surface) = pointer.current_focus() else {
+            return Some(pos);
+        };
+        let mut kind = None;
+        with_pointer_constraint(&surface, &pointer, |c| {
+            if let Some(c) = c {
+                if !c.is_active() {
+                    c.activate();
+                }
+                kind = Some(matches!(&*c, PointerConstraint::Locked(_)));
+            }
+        });
+        match kind {
+            Some(true) => None,
+            Some(false) => {
+                let inside =
+                    matches!(self.under(pos), Under::View(_, s, _) | Under::Layer(s, _, _) if s == surface);
+                Some(if inside { pos } else { self.pointer })
+            }
+            None => Some(pos),
+        }
     }
 }
 

@@ -439,6 +439,26 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
     };
     let now = state.now();
 
+    // Écran éteint (wlopm): noir
+    if state.output_off(output) {
+        return elements;
+    }
+
+    // Verrouillé: seulement la surface de verrouillage de l'écran
+    if state.is_locked() {
+        if let Some(l) = state.lock_surface(output) {
+            elements.extend(render_elements_from_surface_tree(
+                renderer,
+                l.wl_surface(),
+                Point::<i32, Physical>::from((0, 0)),
+                scale,
+                1.0,
+                Kind::Unspecified,
+            ));
+        }
+        return elements;
+    }
+
     let layer_elements = |renderer: &mut GlesRenderer, layer: Layer| -> Vec<Elem> {
         let map = layer_map_for_output(output);
         let mut out = vec![];
@@ -452,14 +472,17 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         out
     };
 
-    // Menus, devant tout le reste
+    // Menus et OSD, devant tout le reste
     elements.extend(menu_elements(state, renderer, scale, output_loc, &progs, now));
+    elements.extend(osd_elements(state, renderer, output, scale, &progs, now));
 
     let stacking = state.stacking();
     let full = state.fullscreen_top();
     elements.extend(layer_elements(renderer, Layer::Overlay));
     if let Some(i) = full {
-        elements.extend(animated_view(state, renderer, i, scale, output_loc, &progs, now));
+        elements.extend(animated_view(
+            state, renderer, i, scale, output_loc, &progs, now, 0.0,
+        ));
     }
     elements.extend(layer_elements(renderer, Layer::Top));
 
@@ -504,9 +527,82 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         elements.extend(transform(base, look, g.snapshot.frame, output_loc, scale));
     }
 
+    // Contour de la vue choisie pendant Alt+Tab
+    if state.config.switcher.outlines
+        && let Some(i) = state
+            .cycle
+            .as_ref()
+            .and_then(|c| c.windows.get(c.index))
+            .and_then(|w| state.window_index(w))
+        && state.visible(&state.views[i])
+    {
+        let f = state.frame_rect(i);
+        let c = state.theme.osd.hilight_bg;
+        let radius = state.config.corner_radius as f32;
+        elements.push(Elem::Pixel(pixel(
+            &progs.frame,
+            Rectangle::new(
+                f.loc - output_loc - Point::from((2, 2)),
+                f.size + Size::from((4, 4)),
+            ),
+            1.0,
+            vec![
+                Uniform::new("border_color", c.premultiplied()),
+                Uniform::new("title_color", [0.0f32; 4]),
+                Uniform::new("radius_top", radius + 2.0),
+                Uniform::new("radius_bottom", radius + 2.0),
+                Uniform::new("border", 3.0f32),
+                Uniform::new("title_height", 0.0f32),
+                Uniform::new("px", px(scale)),
+            ],
+        )));
+    }
+
+    // Changement de bureau: les vues de l'ancien bureau sortent, celles du
+    // nouveau entrent, d'un écran de large (§ 10.5)
+    let width = state.output_geometry(output).size.w as f64;
+    let slide = match state.desk_anim {
+        Some((a, from)) if !a.done(now) => {
+            let p = a.value(now);
+            let dir = if state.desktop > from { 1.0 } else { -1.0 };
+            Some((p, dir, from))
+        }
+        Some(_) => {
+            state.desk_anim = None;
+            None
+        }
+        None => None,
+    };
     for &i in stacking.iter().rev() {
         if Some(i) != full {
-            elements.extend(animated_view(state, renderer, i, scale, output_loc, &progs, now));
+            let shift = match slide {
+                Some((p, dir, _)) if !state.views[i].omnipresent => dir * width * (1.0 - p),
+                _ => 0.0,
+            };
+            elements.extend(animated_view(
+                state, renderer, i, scale, output_loc, &progs, now, shift,
+            ));
+        }
+    }
+    if let Some((p, dir, from)) = slide {
+        let mut old: Vec<usize> = (0..state.views.len())
+            .filter(|&i| {
+                let v = &state.views[i];
+                v.mapped && !v.minimized && v.on_desktop(from) && !v.on_desktop(state.desktop)
+            })
+            .collect();
+        old.sort_by_key(|&i| state.views[i].stack);
+        for &i in old.iter().rev() {
+            elements.extend(animated_view(
+                state,
+                renderer,
+                i,
+                scale,
+                output_loc,
+                &progs,
+                now,
+                -dir * width * p,
+            ));
         }
     }
 
@@ -524,9 +620,10 @@ fn animated_view(
     output_loc: Point<i32, Logical>,
     progs: &Progs,
     now: std::time::Duration,
+    shift: f64,
 ) -> Vec<Elem> {
     let frame = state.frame_rect(i);
-    let look = match state.views[i].appear {
+    let mut look = match state.views[i].appear {
         Some((anim, kind)) if !anim.done(now) => appear_look(kind, frame, anim.value(now)),
         Some(_) => {
             state.views[i].appear = None;
@@ -534,6 +631,7 @@ fn animated_view(
         }
         None => Look::none(),
     };
+    look.offset.x += shift;
     let base = view_elements(state, renderer, i, scale, output_loc, progs, look.alpha);
     if look.is_identity() {
         base.into_iter().map(Elem::from).collect()
@@ -618,6 +716,113 @@ fn menu_elements(
         );
     }
     elements
+}
+
+/// Image flottante (OSD) et son ombre
+fn floating(
+    renderer: &mut GlesRenderer,
+    progs: &Progs,
+    buffer: &MemoryRenderBuffer,
+    px_size: Size<i32, Logical>,
+    rect: Rectangle<i32, Logical>,
+    alpha: f32,
+    scale: f64,
+    t: &crate::theme::OsdTheme,
+) -> Vec<Elem> {
+    let mut out = vec![];
+    match MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        rect.loc.to_f64().to_physical(scale),
+        buffer,
+        Some(alpha),
+        Some(Rectangle::from_size(px_size.to_f64())),
+        Some(rect.size),
+        Kind::Unspecified,
+    ) {
+        Ok(e) => out.push(Elem::Memory(e)),
+        Err(e) => warn!("image de l'OSD: {e:?}"),
+    }
+    let s = t.shadow_size;
+    if s > 0 && t.shadow_color.a > 0.0 {
+        let area = Rectangle::new(
+            rect.loc - Point::from((s, s)),
+            rect.size + Size::from((2 * s, 2 * s)),
+        );
+        out.push(Elem::Pixel(shadow(
+            progs,
+            area,
+            s,
+            rect.size,
+            t.corner_radius as f32,
+            t.shadow_color,
+            alpha,
+            scale,
+        )));
+    }
+    out
+}
+
+/// OSD (Alt+Tab, nom du bureau), centré sur l'écran, et celui qui disparaît
+fn osd_elements(
+    state: &mut State,
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    scale: f64,
+    progs: &Progs,
+    now: std::time::Duration,
+) -> Vec<Elem> {
+    if state
+        .osd
+        .as_ref()
+        .and_then(|o| o.hide_at)
+        .is_some_and(|h| now >= h)
+    {
+        state.hide_osd();
+    }
+    let size = state.output_geometry(output).size;
+    state.osd_image(scale, size);
+    let center =
+        |s: Size<i32, Logical>| Rectangle::new(Point::from(((size.w - s.w) / 2, (size.h - s.h) / 2)), s);
+    let t = state.theme.osd.clone();
+    let mut out = vec![];
+    if let Some(o) = state.osd.as_mut() {
+        let p = match o.anim {
+            Some(a) if !a.done(now) => a.value(now),
+            _ => {
+                o.anim = None;
+                1.0
+            }
+        };
+        if let Some(img) = &o.image {
+            out.extend(floating(
+                renderer,
+                progs,
+                &img.buffer,
+                img.px,
+                center(img.size),
+                p.clamp(0.0, 1.0) as f32,
+                scale,
+                &t,
+            ));
+        }
+    }
+    if state.osd_ghost.as_ref().is_some_and(|g| g.anim.done(now)) {
+        state.osd_ghost = None;
+    }
+    if let Some(g) = &state.osd_ghost {
+        let p = g.anim.value(now);
+        out.extend(floating(
+            renderer,
+            progs,
+            &g.image.buffer,
+            g.image.px,
+            center(g.image.size),
+            (1.0 - p).clamp(0.0, 1.0) as f32,
+            scale,
+            &t,
+        ));
+    }
+    out
 }
 
 /// Ombre d'un rectangle arrondi de taille `size`, placée dans `area`

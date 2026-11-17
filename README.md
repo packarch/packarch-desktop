@@ -6,19 +6,22 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : **version 0.3** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+État : **version 0.4** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
 § 14). Fenêtres décorées par le compositeur (thème Openbox, coins arrondis,
-ombres), couches layer-shell (waybar, swaybg), `rc.xml` complet pour les
-réglages de Packarch : raccourcis (y compris en AZERTY), liaisons de la
-souris, bureaux, collage aux bords et aux régions, règles de fenêtres,
-`environment`, `autostart`, rechargement (`packarch --reconfigure` ou
-Ctrl+Maj+R). Menus de `menu.xml` arrondis et ombrés : sous-menus au survol,
-pipemenus asynchrones, icônes (png, svg, thème d'icônes), menu de fenêtre,
-liste des fenêtres, navigation au clavier. Animations : menus, ouverture,
-fermeture, réduction et restauration des fenêtres (réglables dans
-`<animations>`, `--no-animations`). Pas encore de session réelle
-(backend udev, 0.4) ; les animations de maximisation, d'enroulement, de
-changement de bureau et des OSD restent à faire.
+ombres), couches layer-shell, `rc.xml` complet pour les réglages de Packarch
+(raccourcis en AZERTY, souris, bureaux, collage, règles, rechargement),
+menus de `menu.xml` arrondis et ombrés avec pipemenus, animations.
+
+Session réelle (backend udev : DRM/KMS, libseat, libinput, plusieurs
+écrans, branchement à chaud, Ctrl+Alt+F1…F12) ; liste Alt+Tab et nom du
+bureau à l'écran, glissement au changement de bureau ; protocoles du
+quotidien : verrouillage (hyprlock), inactivité (swayidle), barre des
+tâches et bureaux de waybar, capture (grim), wlr-randr, wlopm,
+presse-papiers des outils, activation, méthodes de saisie, contraintes du
+pointeur, bacs à sable (security-context).
+
+Pas encore : XWayland (0.5), animations de maximisation, d'enroulement et
+de collage. Le backend udev n'a pas encore été essayé sur une vraie console.
 
 ## Essayer
 
@@ -26,6 +29,8 @@ changement de bureau et des OSD restent à faire.
 cargo build
 # Dans une fenêtre de la session en cours, avec la config de labwc :
 ./target/debug/packarch -C ~/.config/labwc -s waybar -s kitty
+# Sur une console libre (Ctrl+Alt+F3), en session complète :
+./target/debug/packarch -C ~/.config/labwc
 # Sans écran, scénarios d'essai (tests/scenarios), captures dans target/captures :
 tests/capture.sh
 ```

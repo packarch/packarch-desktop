@@ -218,6 +218,43 @@ pub struct Theme {
     /// Images des boutons: (normal, basculé)
     pub masks: HashMap<Button, (Mask, Mask)>,
     pub menu: MenuTheme,
+    pub osd: OsdTheme,
+}
+
+/// Apparence des OSD: liste Alt+Tab, nom du bureau (§ 6.3)
+#[derive(Debug, Clone)]
+pub struct OsdTheme {
+    pub bg: Color,
+    pub border_color: Color,
+    pub border_width: i32,
+    pub text: Color,
+    pub hilight_bg: Color,
+    pub hilight_text: Color,
+    pub corner_radius: i32,
+    pub shadow_size: i32,
+    pub shadow_color: Color,
+}
+
+fn osd_theme(rc: &ThemeRc, menu: &MenuTheme) -> OsdTheme {
+    let bg = rc.color("osd.bg.color").unwrap_or(menu.bg);
+    let text = rc.color("osd.label.text.color").unwrap_or(menu.text);
+    OsdTheme {
+        bg,
+        border_color: rc.color("osd.border.color").unwrap_or(menu.border_color),
+        border_width: rc
+            .int("osd.border.width")
+            .unwrap_or(menu.border_width.min(4))
+            .max(0),
+        text,
+        hilight_bg: rc.color("osd.hilight.bg.color").unwrap_or(menu.active_bg),
+        hilight_text: rc
+            .color("osd.active.label.text.color")
+            .filter(|c| *c != rc.color("osd.hilight.bg.color").unwrap_or(menu.active_bg))
+            .unwrap_or(menu.active_text),
+        corner_radius: rc.int("osd.corner.radius").unwrap_or(menu.corner_radius).max(0),
+        shadow_size: rc.int("osd.shadow.size").unwrap_or(menu.shadow_size).max(0),
+        shadow_color: rc.color("osd.shadow.color").unwrap_or(menu.shadow_color),
+    }
 }
 
 /// Apparence des menus (§ 6.3, § 10.4)
@@ -441,6 +478,7 @@ impl Theme {
         let border_width = rc.int("border.width").unwrap_or(1).max(0);
         let active = colors(rc, "active", Color::rgba(0.0, 0.0, 0.0, 0.6));
         let menu = menu_theme(rc, border_width, &active);
+        let osd = osd_theme(rc, &menu);
         Theme {
             name: name.to_string(),
             border_width,
@@ -451,6 +489,7 @@ impl Theme {
             inactive: colors(rc, "inactive", Color::rgba(0.0, 0.0, 0.0, 0.4)),
             masks,
             menu,
+            osd,
         }
     }
 }

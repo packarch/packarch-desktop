@@ -1,0 +1,84 @@
+# Version 0.4: protocoles du quotidien avec de vrais clients (grim,
+# wl-clipboard, swayidle, waybar, hyprlock). Lancé par tests/capture.sh.
+wait 1500
+spawn kitty --config NONE -o confirm_os_window_close=0 -T un -e sh -c 'echo Un; sleep 120'
+wait-views 1 8000
+spawn kitty --config NONE -o confirm_os_window_close=0 -T deux -e sh -c 'echo Deux; sleep 120'
+wait-views 2 8000
+wait 800
+# Capture d'écran (wlr-screencopy)
+spawn grim grim.png
+expect-file grim.png 5000
+spawn grim -g '100,100 200x150' grim-zone.png
+expect-file grim-zone.png 5000
+# Presse-papiers des outils (data-control)
+spawn printf bonjour | wl-copy
+wait 500
+spawn wl-paste -n > presse-papiers.txt
+expect-file presse-papiers.txt 3000
+# Inactivité (ext-idle-notify): 1 s sans entrée
+spawn swayidle timeout 1 'touch inactif'
+wait 2500
+expect-file inactif 1000
+# Barre des tâches et bureaux de waybar (wlr-foreign-toplevel, ext-workspace)
+combo 125 3
+wait 500
+expect-desktop 2
+capture 01-bureau-2.png
+combo 125 2
+wait 500
+capture 02-barre.png
+# Alt+Tab: liste à l'écran tant qu'Alt est enfoncé; Échap annule
+expect-focus deux
+keydown 56
+key 15
+wait 250
+capture 04-alt-tab.png
+expect-focus un
+key 1
+keyup 56
+expect-focus deux
+keydown 56
+key 15
+keyup 56
+wait 300
+expect-focus un
+# Nom du bureau et glissement des vues à mi-parcours
+clock-freeze
+combo 125 3
+clock-advance 110
+wait 100
+capture 05-glissement-mi-parcours.png
+clock-run
+wait 300
+capture 06-nom-du-bureau.png
+combo 125 2
+wait 800
+# Écrans pour les outils: wlr-randr (wlr-output-management), wlopm
+spawn wlr-randr > randr.txt
+expect-file randr.txt 3000
+spawn wlr-randr --output HEADLESS-1 --scale 1.25
+wait 800
+capture 07-echelle-1-25.png
+spawn wlr-randr --output HEADLESS-1 --scale 1
+wait 800
+spawn wlopm > wlopm.txt
+expect-file wlopm.txt 3000
+spawn wlopm --off HEADLESS-1
+wait 500
+capture 08-ecran-eteint.png
+spawn wlopm --on HEADLESS-1
+wait 500
+# Verrouillage (ext-session-lock): hyprlock, puis la session reste
+# verrouillée quand il est tué
+spawn printf 'background {\n color = rgba(40, 30, 60, 1.0)\n}\nlabel {\n text = Verrouillé\n font_size = 32\n position = 0, 0\n halign = center\n valign = center\n}\n' > hyprlock.conf && hyprlock -c hyprlock.conf --immediate-render > hyprlock.log 2>&1
+wait 2500
+expect-locked yes
+capture 03-verrou.png
+# Les raccourcis normaux ne passent plus
+combo 125 3
+expect-desktop 1
+spawn pkill -x hyprlock
+wait 800
+expect-locked yes
+quit

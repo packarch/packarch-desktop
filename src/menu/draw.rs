@@ -134,7 +134,7 @@ pub fn layout(
     }
 }
 
-fn paint(c: Color) -> Paint<'static> {
+pub(crate) fn paint(c: Color) -> Paint<'static> {
     let mut p = Paint::default();
     p.set_color_rgba8(
         (c.r * 255.0).round() as u8,
@@ -146,14 +146,14 @@ fn paint(c: Color) -> Paint<'static> {
     p
 }
 
-fn fill_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, c: Color) {
+pub(crate) fn fill_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, c: Color) {
     if let Some(r) = Rect::from_xywh(x, y, w, h) {
         pm.fill_rect(r, &paint(c), Transform::identity(), None);
     }
 }
 
 /// Rectangle aux coins arrondis
-fn rounded(w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
+pub(crate) fn rounded(w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
     let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
     let mut pb = PathBuilder::new();
     // Approximation d'un quart de cercle par une cubique
@@ -172,7 +172,7 @@ fn rounded(w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
 }
 
 /// Pose une image prémultipliée (`crate::deco::Image`) sur la pixmap
-fn blit(pm: &mut Pixmap, img: &crate::deco::Image, x0: i32, y0: i32) {
+pub(crate) fn blit(pm: &mut Pixmap, img: &crate::deco::Image, x0: i32, y0: i32) {
     let (pw, ph) = (pm.width() as i32, pm.height() as i32);
     let data = pm.data_mut();
     for y in 0..img.height as i32 {

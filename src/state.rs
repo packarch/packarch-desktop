@@ -149,11 +149,34 @@ pub struct State {
     pub no_animations: bool,
     /// Vues fermées ou réduites, encore animées
     pub ghosts: Vec<crate::render::Ghost>,
+
+    /// Protocoles du § 9.2
+    pub protocols: crate::protocols::Protocols,
+    /// Verrouillage (ext-session-lock) et surfaces de verrouillage par écran
+    pub lock: crate::protocols::Lock,
+    pub lock_surfaces: Vec<(Output, smithay::wayland::session_lock::LockSurface)>,
+    /// Surfaces qui empêchent la mise en veille (vidéos)
+    pub idle_inhibitors: Vec<WlSurface>,
+    /// Curseur demandé par le client sous le pointeur
+    pub cursor_status: smithay::input::pointer::CursorImageStatus,
+    /// OSD affiché (Alt+Tab, nom du bureau) et celui qui disparaît
+    pub osd: Option<crate::osd::Osd>,
+    pub osd_ghost: Option<crate::osd::OsdGhost>,
+    /// Applications installées (fichiers .desktop)
+    pub apps: crate::apps::Apps,
+    /// Glissement du changement de bureau: animation, ancien bureau
+    pub desk_anim: Option<(crate::anim::Anim, usize)>,
+    /// Curseurs du thème (session réelle)
+    pub cursors: Option<crate::cursor::Cursors>,
+    /// Horloge monotone (presentation-time)
+    pub monotonic: smithay::utils::Clock<smithay::utils::Monotonic>,
 }
 
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// Client lancé dans un bac à sable (security-context)
+    pub security_context: Option<smithay::wayland::security_context::SecurityContext>,
 }
 
 impl ClientData for ClientState {
@@ -227,6 +250,7 @@ impl State {
             warn!("{e}");
             crate::menu::Menus::fallback()
         });
+        let protocols = crate::protocols::Protocols::new(&dh, &handle, &primary_selection_state);
         let mut icons = crate::icons::Icons::default();
         icons.set_theme(&config.icon_theme);
         let child_env = vec![
@@ -287,6 +311,17 @@ impl State {
             clock: crate::anim::Clock::default(),
             no_animations: false,
             ghosts: vec![],
+            protocols,
+            lock: crate::protocols::Lock::Unlocked,
+            lock_surfaces: vec![],
+            idle_inhibitors: vec![],
+            cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
+            monotonic: smithay::utils::Clock::new(),
+            osd: None,
+            osd_ghost: None,
+            apps: crate::apps::Apps::default(),
+            desk_anim: None,
+            cursors: None,
         }
     }
 
@@ -436,6 +471,19 @@ impl State {
     /// Ce qui se trouve au point `p` (coordonnées globales)
     pub fn under(&self, p: Point<f64, Logical>) -> Under {
         let output = self.output_at(p);
+        if self.is_locked() {
+            return output
+                .as_ref()
+                .and_then(|o| {
+                    let s = self.lock_surface(o)?;
+                    Some(Under::Layer(
+                        s.wl_surface().clone(),
+                        o.current_location().to_f64(),
+                        false,
+                    ))
+                })
+                .unwrap_or(Under::Root);
+        }
         let layer_hit = |layers: &[Layer]| -> Option<Under> {
             let output = output.as_ref()?;
             let map = layer_map_for_output(output);
@@ -479,6 +527,14 @@ impl State {
     }
 
     pub fn set_keyboard_focus(&mut self, surface: Option<WlSurface>) {
+        // Verrouillé: seule une surface de verrouillage reçoit le clavier
+        if self.is_locked()
+            && surface
+                .as_ref()
+                .is_some_and(|s| !self.lock_surfaces.iter().any(|(_, l)| l.wl_surface() == s))
+        {
+            return;
+        }
         let serial = SERIAL_COUNTER.next_serial();
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, surface.clone(), serial);
