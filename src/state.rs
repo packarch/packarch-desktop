@@ -170,6 +170,8 @@ pub struct State {
     pub xwayland: crate::xwayland::Xwayland,
     /// Le script autostart a été lancé
     pub autostarted: bool,
+    /// L'environnement a été exporté vers systemd et D-Bus
+    pub env_exported: bool,
     /// Curseurs du thème (session réelle)
     pub cursors: Option<crate::cursor::Cursors>,
     /// Horloge monotone (presentation-time)
@@ -336,6 +338,7 @@ impl State {
                 shell: xwayland_shell,
             },
             autostarted: false,
+            env_exported: false,
         }
     }
 

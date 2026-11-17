@@ -65,10 +65,20 @@ impl State {
     /// Envoie l'environnement de la session à systemd et à D-Bus (portails,
     /// services), seulement en session réelle: imbriqué, il détournerait
     /// celui de la session hôte (§ 5.6)
-    pub fn export_session_env(&self) {
+    pub fn export_session_env(&mut self) {
         if !matches!(self.backend, Some(crate::backend::Backend::Udev(_))) {
             return;
         }
+        // Une autre session graphique du même utilisateur est active (essai
+        // sur une autre console): son environnement est gardé, sinon ses
+        // programmes lancés par D-Bus s'ouvriraient ici
+        if let Some(other) = other_session_display(&self.socket_name.to_string_lossy()) {
+            if !self.env_exported {
+                warn!("autre session active ({other}): environnement non exporté vers systemd et D-Bus");
+            }
+            return;
+        }
+        self.env_exported = true;
         let names = [
             "WAYLAND_DISPLAY",
             "DISPLAY",
@@ -155,7 +165,47 @@ impl State {
         if let Some(path) = pid_file(&self.socket_name.to_string_lossy()) {
             let _ = std::fs::remove_file(path);
         }
+        // Les variables exportées ne doivent pas survivre à la session
+        if self.env_exported {
+            let _ = std::process::Command::new("systemctl")
+                .args([
+                    "--user",
+                    "unset-environment",
+                    "WAYLAND_DISPLAY",
+                    "DISPLAY",
+                    "XDG_CURRENT_DESKTOP",
+                    "XDG_SESSION_DESKTOP",
+                    "PACKARCH_PID",
+                ])
+                .status();
+        }
     }
+}
+
+/// `WAYLAND_DISPLAY` de l'environnement de systemd s'il désigne la socket
+/// encore présente d'une autre session que la nôtre (`ours`)
+fn other_session_display(ours: &str) -> Option<String> {
+    let out = std::process::Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let display = text
+        .lines()
+        .find_map(|l| l.strip_prefix("WAYLAND_DISPLAY="))?
+        .trim()
+        .to_string();
+    if display.is_empty() || display == ours {
+        return None;
+    }
+    let path = if display.starts_with('/') {
+        PathBuf::from(&display)
+    } else {
+        PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join(&display)
+    };
+    // Socket présente et quelqu'un l'écoute
+    std::os::unix::net::UnixStream::connect(&path).ok()?;
+    Some(display)
 }
 
 /// SIGHUP recharge, SIGTERM et SIGINT quittent proprement
