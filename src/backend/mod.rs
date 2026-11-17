@@ -111,6 +111,12 @@ pub fn after_render(state: &mut State, output: &Output) {
     for view in &state.views {
         view.window.refresh();
     }
+    state.sync_x11_positions();
+    for (s, _) in state.unmanaged_surfaces() {
+        smithay::desktop::utils::send_frames_surface_tree(&s, output, time, throttle, |_, _| {
+            Some(output.clone())
+        });
+    }
     for (_, l) in &state.lock_surfaces {
         smithay::desktop::utils::send_frames_surface_tree(l.wl_surface(), output, time, throttle, |_, _| {
             Some(output.clone())

@@ -476,6 +476,19 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
     elements.extend(menu_elements(state, renderer, scale, output_loc, &progs, now));
     elements.extend(osd_elements(state, renderer, output, scale, &progs, now));
 
+    // Fenêtres X11 sans cadre (menus, bulles), devant les vues
+    for (surface, geo) in state.unmanaged_surfaces().into_iter().rev() {
+        let loc = (geo.loc - output_loc).to_physical_precise_round(scale);
+        elements.extend(render_elements_from_surface_tree(
+            renderer,
+            &surface,
+            loc,
+            scale,
+            1.0,
+            Kind::Unspecified,
+        ));
+    }
+
     let stacking = state.stacking();
     let full = state.fullscreen_top();
     elements.extend(layer_elements(renderer, Layer::Overlay));
@@ -1251,17 +1264,12 @@ fn render_offscreen(
             rendered: false,
         });
     }
+    let surface = view.surface().clone();
     let off = view.offscreen.as_mut().unwrap();
     let loc: Point<i32, Physical> =
         Point::<i32, Logical>::from((-geo.loc.x, -geo.loc.y)).to_physical_precise_round(scale);
-    let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = render_elements_from_surface_tree(
-        renderer,
-        view.window.toplevel().unwrap().wl_surface(),
-        loc,
-        scale,
-        1.0,
-        Kind::Unspecified,
-    );
+    let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+        render_elements_from_surface_tree(renderer, &surface, loc, scale, 1.0, Kind::Unspecified);
     let mut target: GlesTarget = renderer.bind(&mut off.texture)?;
     let age = if off.rendered { 1 } else { 0 };
     let result = off

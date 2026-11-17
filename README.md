@@ -6,22 +6,27 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : **version 0.4** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+État : **version 0.5** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
 § 14). Fenêtres décorées par le compositeur (thème Openbox, coins arrondis,
 ombres), couches layer-shell, `rc.xml` complet pour les réglages de Packarch
-(raccourcis en AZERTY, souris, bureaux, collage, règles, rechargement),
-menus de `menu.xml` arrondis et ombrés avec pipemenus, animations.
+(raccourcis en AZERTY, souris, bureaux, collage, régions, règles de
+fenêtres, rechargement), menus de `menu.xml` arrondis et ombrés avec
+pipemenus, animations.
 
 Session réelle (backend udev : DRM/KMS, libseat, libinput, plusieurs
 écrans, branchement à chaud, Ctrl+Alt+F1…F12) ; liste Alt+Tab et nom du
-bureau à l'écran, glissement au changement de bureau ; protocoles du
-quotidien : verrouillage (hyprlock), inactivité (swayidle), barre des
-tâches et bureaux de waybar, capture (grim), wlr-randr, wlopm,
-presse-papiers des outils, activation, méthodes de saisie, contraintes du
-pointeur, bacs à sable (security-context).
+bureau à l'écran ; protocoles du quotidien : verrouillage (hyprlock),
+inactivité (swayidle), barre des tâches et bureaux de waybar, capture
+(grim), wlr-randr, wlopm, presse-papiers des outils, activation, méthodes
+de saisie, contraintes du pointeur, bacs à sable (security-context).
 
-Pas encore : XWayland (0.5), animations de maximisation, d'enroulement et
-de collage. Le backend udev n'a pas encore été essayé sur une vraie console.
+XWayland : applications X11 décorées comme les autres, menus et bulles X11,
+focus clavier X, presse-papiers partagé, `_NET_WM_STATE`, dialogues centrés
+sur leur parent. Fichiers d'intégration (session, portails) dans
+[data/](data/).
+
+Pas encore : animations de maximisation, d'enroulement et de collage ;
+priorité 2 des actions (1.0).
 
 ## Essayer
 

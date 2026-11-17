@@ -166,6 +166,10 @@ pub struct State {
     pub apps: crate::apps::Apps,
     /// Glissement du changement de bureau: animation, ancien bureau
     pub desk_anim: Option<(crate::anim::Anim, usize)>,
+    /// XWayland (§ 9.4)
+    pub xwayland: crate::xwayland::Xwayland,
+    /// Le script autostart a été lancé
+    pub autostarted: bool,
     /// Curseurs du thème (session réelle)
     pub cursors: Option<crate::cursor::Cursors>,
     /// Horloge monotone (presentation-time)
@@ -253,6 +257,7 @@ impl State {
             crate::menu::Menus::fallback()
         });
         let protocols = crate::protocols::Protocols::new(&dh, &handle, &primary_selection_state);
+        let xwayland_shell = smithay::wayland::xwayland_shell::XWaylandShellState::new::<State>(&dh);
         let mut icons = crate::icons::Icons::default();
         icons.set_theme(&config.icon_theme);
         let child_env = vec![
@@ -324,6 +329,13 @@ impl State {
             apps: crate::apps::Apps::default(),
             desk_anim: None,
             cursors: None,
+            xwayland: crate::xwayland::Xwayland {
+                wm: None,
+                display: None,
+                unmanaged: vec![],
+                shell: xwayland_shell,
+            },
+            autostarted: false,
         }
     }
 
@@ -407,7 +419,10 @@ impl State {
     }
 
     pub fn focused_surface(&self) -> Option<WlSurface> {
-        self.seat.get_keyboard().and_then(|k| k.current_focus())
+        self.seat
+            .get_keyboard()
+            .and_then(|k| k.current_focus())
+            .map(|f| f.surface)
     }
 
     /// Surface de premier niveau qui a le clavier: celle d'une fenêtre
@@ -473,6 +488,11 @@ impl State {
     /// Ce qui se trouve au point `p` (coordonnées globales)
     pub fn under(&self, p: Point<f64, Logical>) -> Under {
         let output = self.output_at(p);
+        if !self.is_locked()
+            && let Some((s, loc)) = self.unmanaged_under(p)
+        {
+            return Under::Layer(s, loc, false);
+        }
         if self.is_locked() {
             return output
                 .as_ref()
@@ -538,13 +558,19 @@ impl State {
             return;
         }
         let serial = SERIAL_COUNTER.next_serial();
+        let focus = surface.clone().map(|s| {
+            let x11 = self.view_index(&s).and_then(|i| self.views[i].x11().cloned());
+            KbFocus { surface: s, x11 }
+        });
         if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, surface.clone(), serial);
+            keyboard.set_focus(self, focus, serial);
         }
         for view in &self.views {
             let active = surface.as_ref() == Some(view.surface());
-            if view.window.set_activated(active) {
-                view.window.toplevel().unwrap().send_pending_configure();
+            if view.window.set_activated(active)
+                && let Some(t) = view.window.toplevel()
+            {
+                t.send_pending_configure();
             }
         }
         if let Some(i) = surface.as_ref().and_then(|s| self.view_index(s)) {
@@ -562,4 +588,88 @@ fn us_keymap() -> Option<smithay::input::keyboard::xkb::Keymap> {
     use smithay::input::keyboard::xkb;
     let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
     xkb::Keymap::new_from_names(&ctx, "", "", "us", "", None, xkb::KEYMAP_COMPILE_NO_FLAGS)
+}
+
+/// Cible du clavier: une surface, et sa fenêtre X11 si c'en est une (le
+/// focus X lui est alors donné aussi: SetInputFocus, WM_TAKE_FOCUS)
+#[derive(Debug, Clone, PartialEq)]
+pub struct KbFocus {
+    pub surface: WlSurface,
+    pub x11: Option<smithay::xwayland::X11Surface>,
+}
+
+impl From<WlSurface> for KbFocus {
+    fn from(surface: WlSurface) -> KbFocus {
+        KbFocus { surface, x11: None }
+    }
+}
+
+impl From<smithay::desktop::PopupKind> for KbFocus {
+    fn from(popup: smithay::desktop::PopupKind) -> KbFocus {
+        KbFocus::from(popup.wl_surface().clone())
+    }
+}
+
+impl smithay::utils::IsAlive for KbFocus {
+    fn alive(&self) -> bool {
+        self.surface.alive()
+    }
+}
+
+impl smithay::wayland::seat::WaylandFocus for KbFocus {
+    fn wl_surface(&self) -> Option<std::borrow::Cow<'_, WlSurface>> {
+        Some(std::borrow::Cow::Borrowed(&self.surface))
+    }
+}
+
+impl smithay::input::keyboard::KeyboardTarget<State> for KbFocus {
+    fn enter(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        keys: Vec<smithay::input::keyboard::KeysymHandle<'_>>,
+        serial: smithay::utils::Serial,
+    ) {
+        use smithay::input::keyboard::KeyboardTarget;
+        match &self.x11 {
+            Some(x) => KeyboardTarget::enter(x, seat, data, keys, serial),
+            None => KeyboardTarget::enter(&self.surface, seat, data, keys, serial),
+        }
+    }
+
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
+        use smithay::input::keyboard::KeyboardTarget;
+        match &self.x11 {
+            Some(x) => KeyboardTarget::leave(x, seat, data, serial),
+            None => KeyboardTarget::leave(&self.surface, seat, data, serial),
+        }
+    }
+
+    fn key(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        key: smithay::input::keyboard::KeysymHandle<'_>,
+        state: smithay::backend::input::KeyState,
+        serial: smithay::utils::Serial,
+        time: u32,
+    ) {
+        smithay::input::keyboard::KeyboardTarget::key(&self.surface, seat, data, key, state, serial, time)
+    }
+
+    fn modifiers(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        modifiers: smithay::input::keyboard::ModifiersState,
+        serial: smithay::utils::Serial,
+    ) {
+        smithay::input::keyboard::KeyboardTarget::modifiers(&self.surface, seat, data, modifiers, serial)
+    }
+}
+
+impl From<KbFocus> for WlSurface {
+    fn from(f: KbFocus) -> WlSurface {
+        f.surface
+    }
 }

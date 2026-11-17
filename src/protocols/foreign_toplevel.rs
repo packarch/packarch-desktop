@@ -114,7 +114,7 @@ impl State {
     /// Envoie aux barres des tâches les vues apparues, changées ou fermées
     pub fn refresh_toplevels(&mut self) {
         let current: Vec<(u64, Info)> = (0..self.views.len())
-            .filter(|&i| self.views[i].mapped)
+            .filter(|&i| self.views[i].mapped && !self.views[i].skip_taskbar)
             .map(|i| (self.views[i].id, self.toplevel_info(i)))
             .collect();
         let dh = self.dh.clone();
@@ -281,7 +281,7 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, u64> for State {
             R::Activate { .. } => {
                 state.focus_view(i, true);
             }
-            R::Close => state.views[i].window.toplevel().unwrap().send_close(),
+            R::Close => state.views[i].close(),
             R::SetFullscreen { .. } if tiling != Tiling::Fullscreen => state.toggle_fullscreen(i),
             R::UnsetFullscreen if tiling == Tiling::Fullscreen => state.toggle_fullscreen(i),
             _ => {}

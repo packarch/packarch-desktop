@@ -34,6 +34,7 @@
 //! point-menu Terminal    pointeur sur l'entrée de ce libellé
 //! expect-file a.png 2000 attend qu'un fichier existe (2 s au plus)
 //! expect-locked yes      vérifie le verrouillage de la session
+//! expect-views 2         vérifie le nombre de vues affichées
 //! clock-freeze           arrête l'horloge des animations
 //! clock-advance 50       l'avance de 50 ms
 //! clock-run              la remet en marche
@@ -81,6 +82,7 @@ pub enum Step {
     PointMenu(String),
     ExpectFile(PathBuf, u64),
     ExpectLocked(bool),
+    ExpectViews(usize),
     ClockFreeze,
     ClockAdvance(u64),
     ClockRun,
@@ -203,6 +205,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                     let t = args.next().map(|s| s.parse().unwrap_or(3000)).unwrap_or(3000);
                     Step::ExpectFile(PathBuf::from(path), t)
                 }
+                "expect-views" => Step::ExpectViews(num(args.next())? as usize),
                 "expect-locked" => Step::ExpectLocked(
                     crate::config::parse_bool(args.next().unwrap_or("")).ok_or("yes ou no")?,
                 ),
@@ -472,6 +475,12 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                         fail(state, format!("fichier absent: {}", path.display()));
                     }
                     waiting_since = None;
+                }
+                Step::ExpectViews(n) => {
+                    let got = state.views.iter().filter(|v| v.mapped).count();
+                    if got != n {
+                        fail(state, format!("{got} vues affichées au lieu de {n}"));
+                    }
                 }
                 Step::ExpectLocked(b) => {
                     if state.is_locked() != b {

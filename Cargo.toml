@@ -1,6 +1,6 @@
 [package]
 name = "packarch-rwdesktop"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Compositeur Wayland à fenêtres flottantes de Packarch"
@@ -19,6 +19,7 @@ smithay = { version = "0.7.0", default-features = false, features = [
     "backend_libinput",
     "backend_session_libseat",
     "backend_udev",
+    "xwayland",
     "renderer_gl",
     "wayland_frontend",
     "desktop",

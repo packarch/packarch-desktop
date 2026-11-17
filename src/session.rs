@@ -51,9 +51,40 @@ impl State {
         let mut vars = vec![
             ("WAYLAND_DISPLAY".to_string(), socket),
             ("PACKARCH_PID".to_string(), std::process::id().to_string()),
+            ("XDG_CURRENT_DESKTOP".to_string(), "packarch:wlroots".to_string()),
+            ("XDG_SESSION_DESKTOP".to_string(), "packarch".to_string()),
+            ("XDG_SESSION_TYPE".to_string(), "wayland".to_string()),
         ];
+        if let Some(n) = self.xwayland.display {
+            vars.push(("DISPLAY".to_string(), format!(":{n}")));
+        }
         vars.extend(self.env_vars.iter().cloned());
         self.child_env = vars;
+    }
+
+    /// Envoie l'environnement de la session à systemd et à D-Bus (portails,
+    /// services), seulement en session réelle: imbriqué, il détournerait
+    /// celui de la session hôte (§ 5.6)
+    pub fn export_session_env(&self) {
+        if !matches!(self.backend, Some(crate::backend::Backend::Udev(_))) {
+            return;
+        }
+        let names = [
+            "WAYLAND_DISPLAY",
+            "DISPLAY",
+            "XDG_CURRENT_DESKTOP",
+            "XDG_SESSION_DESKTOP",
+            "XDG_SESSION_TYPE",
+            "PACKARCH_PID",
+        ];
+        let present: Vec<&str> = names
+            .into_iter()
+            .filter(|n| self.child_env.iter().any(|(k, _)| k == n))
+            .collect();
+        self.spawn(&format!(
+            "dbus-update-activation-environment --systemd {}",
+            present.join(" ")
+        ));
     }
 
     /// Disposition, répétition, verrouillage numérique (§ 5.2, § 5.6)
@@ -93,6 +124,23 @@ impl State {
             && let Err(e) = std::fs::write(&path, format!("{}\n", std::process::id()))
         {
             warn!("{}: {e}", path.display());
+        }
+        self.export_session_env();
+        // autostart après XWayland (DISPLAY défini), 3 s au plus
+        self.start_xwayland();
+        let _ = self.handle.insert_source(
+            smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_secs(3)),
+            |_, _, state| {
+                state.run_autostart();
+                smithay::reexports::calloop::timer::TimeoutAction::Drop
+            },
+        );
+    }
+
+    /// Script `autostart` (une seule fois)
+    pub fn run_autostart(&mut self) {
+        if std::mem::replace(&mut self.autostarted, true) {
+            return;
         }
         let autostart = self.config.dir.join("autostart");
         if autostart.is_file() {

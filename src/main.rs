@@ -29,6 +29,7 @@ mod state;
 mod theme;
 mod view;
 mod wm;
+mod xwayland;
 
 use std::path::PathBuf;
 

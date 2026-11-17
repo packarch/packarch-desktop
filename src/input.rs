@@ -1065,7 +1065,31 @@ impl PointerGrab<State> for ResizeGrab {
         } else if self.edges.bottom {
             h += d.y;
         }
-        let toplevel = self.window.toplevel().unwrap();
+        let clamp = |v: i32, lo: i32, hi: i32| {
+            let v = v.max(lo.max(1));
+            if hi > 0 { v.min(hi) } else { v }
+        };
+        // Fenêtre X11: taille et position appliquées tout de suite
+        if let Some(x) = self.window.x11_surface() {
+            let min = x.min_size().unwrap_or_default();
+            let max = x.max_size().unwrap_or_default();
+            let size: Size<i32, Logical> = Size::from((clamp(w, min.w, max.w), clamp(h, min.h, max.h)));
+            if let Some(i) = data.window_index(&self.window) {
+                let mut loc = data.views[i].loc;
+                if self.edges.left {
+                    loc.x += data.views[i].window.geometry().size.w - size.w;
+                }
+                if self.edges.top {
+                    loc.y += data.views[i].window.geometry().size.h - size.h;
+                }
+                data.views[i].loc = loc;
+                let _ = x.configure(smithay::utils::Rectangle::new(loc, size));
+            }
+            return;
+        }
+        let Some(toplevel) = self.window.toplevel() else {
+            return;
+        };
         let (min, max) = smithay::wayland::compositor::with_states(toplevel.wl_surface(), |s| {
             let mut cached = s
                 .cached_state
@@ -1073,10 +1097,6 @@ impl PointerGrab<State> for ResizeGrab {
             let c = cached.current();
             (c.min_size, c.max_size)
         });
-        let clamp = |v: i32, lo: i32, hi: i32| {
-            let v = v.max(lo.max(1));
-            if hi > 0 { v.min(hi) } else { v }
-        };
         let size = Size::from((clamp(w, min.w, max.w), clamp(h, min.h, max.h)));
         toplevel.with_pending_state(|s| s.size = Some(size));
         if let Some(serial) = toplevel.send_pending_configure()
@@ -1094,13 +1114,16 @@ impl PointerGrab<State> for ResizeGrab {
         if grab_ends(self.keyboard, self.start.button, handle, event) {
             handle.unset_grab(self, data, event.serial, event.time, true);
             data.cursor_status = CursorImageStatus::default_named();
-            let toplevel = self.window.toplevel().unwrap();
-            toplevel.with_pending_state(|s| s.states.unset(xdg_toplevel::State::Resizing));
-            let serial = toplevel.send_pending_configure();
-            if let Some(i) = data.window_index(&self.window)
-                && let Some(r) = data.views[i].resize.as_mut()
-            {
-                r.ending = Some(serial.or(r.last_serial));
+            let serial = self.window.toplevel().and_then(|toplevel| {
+                toplevel.with_pending_state(|s| s.states.unset(xdg_toplevel::State::Resizing));
+                toplevel.send_pending_configure()
+            });
+            if let Some(i) = data.window_index(&self.window) {
+                if self.window.is_x11() {
+                    data.views[i].resize = None;
+                } else if let Some(r) = data.views[i].resize.as_mut() {
+                    r.ending = Some(serial.or(r.last_serial));
+                }
             }
         }
     }

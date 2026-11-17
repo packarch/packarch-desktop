@@ -250,7 +250,9 @@ impl State {
     pub fn raise(&mut self, i: usize) -> usize {
         let view = self.views.remove(i);
         self.views.push(view);
-        self.views.len() - 1
+        let i = self.views.len() - 1;
+        self.raise_x11(i);
+        i
     }
 
     pub fn lower(&mut self, i: usize) -> usize {
@@ -288,9 +290,20 @@ impl State {
     }
 
     /// Envoie au client la taille et les états voulus
-    fn configure(&mut self, i: usize, size: Option<Size<i32, Logical>>) {
+    pub fn configure(&mut self, i: usize, size: Option<Size<i32, Logical>>) {
         let tiling = self.views[i].tiling.clone();
-        let toplevel = self.views[i].window.toplevel().unwrap().clone();
+        // Fenêtre X11: états _NET_WM_STATE et géométrie globale
+        if let Some(x) = self.views[i].x11().cloned() {
+            let full = tiling == Tiling::Fullscreen;
+            let _ = x.set_fullscreen(full);
+            let _ = x.set_maximized(!full && tiling != Tiling::None);
+            let size = size.unwrap_or(self.views[i].window.geometry().size);
+            let _ = x.configure(Rectangle::new(self.views[i].loc, size));
+            return;
+        }
+        let Some(toplevel) = self.views[i].window.toplevel().cloned() else {
+            return;
+        };
         toplevel.with_pending_state(|s| {
             use xdg_toplevel::State as S;
             for st in [
@@ -557,13 +570,14 @@ impl State {
                 .filter(|w| {
                     self.window_index(w).is_some_and(|i| {
                         let v = &self.views[i];
-                        v.mapped && v.on_desktop(self.desktop)
+                        v.mapped && !v.skip_switcher && v.on_desktop(self.desktop)
                     })
                 })
                 .cloned()
                 .collect();
             for v in &self.views {
-                if v.mapped && v.on_desktop(self.desktop) && !windows.contains(&v.window) {
+                if v.mapped && !v.skip_switcher && v.on_desktop(self.desktop) && !windows.contains(&v.window)
+                {
                     windows.push(v.window.clone());
                 }
             }
@@ -702,7 +716,7 @@ impl State {
             Lower => {
                 self.lower(i);
             }
-            Close => self.views[i].window.toplevel().unwrap().send_close(),
+            Close => self.views[i].close(),
             Kill => self.kill(i),
             Iconify => self.iconify(i),
             Maximize(axis) => self.maximize(i, *axis),
@@ -747,6 +761,8 @@ impl State {
                 v.omnipresent = !v.omnipresent;
                 v.desktop = d;
             }
+            // Position fixe (règle fixedPosition): ni déplacement ni placement
+            Move | MoveRelative { .. } | AutoPlace(_) if self.views[i].fixed_position => {}
             Move => self.begin_move(i, origin),
             Resize => self.begin_resize(i, origin),
             MoveRelative { x, y } => {
@@ -876,11 +892,13 @@ impl State {
             last_serial: None,
             ending: None,
         });
-        let toplevel = view.window.toplevel().unwrap().clone();
+        let toplevel = view.window.toplevel().cloned();
         self.cursor_status = CursorImageStatus::Named(crate::input::resize_cursor(edges));
         let view = &mut self.views[i];
-        toplevel.with_pending_state(|s| s.states.set(xdg_toplevel::State::Resizing));
-        toplevel.send_pending_configure();
+        if let Some(toplevel) = toplevel {
+            toplevel.with_pending_state(|s| s.states.set(xdg_toplevel::State::Resizing));
+            toplevel.send_pending_configure();
+        }
         let start = GrabStartData {
             focus: None,
             button: origin.button.unwrap_or(BTN_RIGHT),
@@ -910,10 +928,20 @@ impl State {
         let window = self.views[i].window.clone();
         for rule in rules {
             debug!("règle de fenêtre pour « {title} » ({app_id})");
-            if let Some(d) = rule.server_decoration
-                && let Some(i) = self.window_index(&window)
-            {
-                self.views[i].decorated = d;
+            if let Some(i) = self.window_index(&window) {
+                let v = &mut self.views[i];
+                if let Some(d) = rule.server_decoration {
+                    v.decorated = d;
+                }
+                if let Some(b) = rule.skip_taskbar {
+                    v.skip_taskbar = b;
+                }
+                if let Some(b) = rule.skip_window_switcher {
+                    v.skip_switcher = b;
+                }
+                if let Some(b) = rule.fixed_position {
+                    v.fixed_position = b;
+                }
             }
             let origin = Origin {
                 button: None,

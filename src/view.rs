@@ -96,12 +96,23 @@ pub struct View {
     pub appear: Option<(Anim, Appear)>,
     /// Activation demandée sans jeton valide (§ 8.1)
     pub urgent: bool,
+    /// Surface Wayland de la vue (celle d'une fenêtre X11 est connue après
+    /// son association par xwayland-shell)
+    surface: WlSurface,
+    /// Règles de fenêtre (§ 8.5)
+    pub skip_taskbar: bool,
+    pub skip_switcher: bool,
+    pub fixed_position: bool,
 }
 
 impl View {
-    pub fn new(window: Window, desktop: usize) -> View {
+    pub fn new(window: Window, surface: WlSurface, desktop: usize) -> View {
         View {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            surface,
+            skip_taskbar: false,
+            skip_switcher: false,
+            fixed_position: false,
             window,
             loc: Point::from((0, 0)),
             mapped: false,
@@ -126,7 +137,21 @@ impl View {
     }
 
     pub fn surface(&self) -> &WlSurface {
-        self.window.toplevel().unwrap().wl_surface()
+        &self.surface
+    }
+
+    /// Fenêtre X11 (XWayland)
+    pub fn x11(&self) -> Option<&smithay::xwayland::X11Surface> {
+        self.window.x11_surface()
+    }
+
+    /// Demande la fermeture (xdg_toplevel.close, WM_DELETE_WINDOW)
+    pub fn close(&self) {
+        if let Some(t) = self.window.toplevel() {
+            t.send_close();
+        } else if let Some(x) = self.x11() {
+            let _ = x.close();
+        }
     }
 
     fn toplevel_data<T>(
@@ -145,11 +170,18 @@ impl View {
     }
 
     pub fn title(&self) -> String {
-        self.toplevel_data(|d| d.title.clone().unwrap_or_default())
+        match self.x11() {
+            Some(x) => x.title(),
+            None => self.toplevel_data(|d| d.title.clone().unwrap_or_default()),
+        }
     }
 
+    /// Identifiant: app_id Wayland, ou classe X11 (§ 8.5)
     pub fn app_id(&self) -> String {
-        self.toplevel_data(|d| d.app_id.clone().unwrap_or_default())
+        match self.x11() {
+            Some(x) => x.class(),
+            None => self.toplevel_data(|d| d.app_id.clone().unwrap_or_default()),
+        }
     }
 
     /// Taille du client (zéro en hauteur quand la vue est enroulée)

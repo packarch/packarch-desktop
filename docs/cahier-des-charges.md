@@ -746,5 +746,10 @@ Décidé le 17 novembre 2026 :
 7. Alt+Tab : Échap revient à la vue de départ. Colonne
    `desktop_entry_name` : nom du fichier `.desktop` correspondant à
    l'identifiant de la vue (nom traduit selon `LANG`).
+8. XWayland est lancé au démarrage, quel que soit `xwaylandPersistence`
+   (le démarrage à la première connexion X11 viendra plus tard) ;
+   `autostart` attend qu'il soit prêt (3 s au plus) pour que `DISPLAY` soit
+   défini. Les fenêtres X11 sans indication Motif reçoivent le cadre du
+   compositeur ; celles qui demandent « sans décoration » (Steam…) non.
 
 Aucune question ouverte pour l'instant.

@@ -1,0 +1,57 @@
+# Version 0.5: XWayland (§ 9.4). kitty et glxgears en X11, xdotool pour
+# vérifier ce que voient les clients X. Lancé par tests/capture.sh.
+wait 3000
+spawn env KITTY_DISABLE_WAYLAND=1 kitty --config NONE -o confirm_os_window_close=0 -o remember_window_size=no -o initial_window_width=600 -o initial_window_height=350 -T x11 -e sh -c 'read l; echo "$l" > saisie.txt; sleep 120'
+wait-views 1 10000
+wait 800
+expect-focus x11
+capture 01-x11.png
+# Le focus X est sur kitty, sa classe est lue
+spawn sh -c 'xdotool getwindowfocus getwindowname > focus.txt; xprop -id $(xdotool getwindowfocus) WM_CLASS > classe.txt'
+expect-file classe.txt 3000
+# Le clavier arrive au client X: « ab » puis Entrée
+key 30
+key 48
+key 28
+expect-file saisie.txt 3000
+# Déplacement par la barre de titre: la position est transmise au client X
+mark x11
+point x11 title
+press left
+move-by 60 40
+move-by 40 20
+release left
+wait 300
+expect-moved x11 100 60
+spawn sh -c 'xdotool getwindowfocus getwindowgeometry > geometrie.txt'
+expect-file geometrie.txt 3000
+# Redimensionnement par le bord droit
+mark x11
+point x11 right
+press left
+move-by 30 0
+move-by 30 0
+release left
+wait 400
+expect-grown x11 60 0
+# Maximiser (W-a) et revenir
+combo 125 16
+wait 500
+expect x11 0 38 1280 724
+capture 02-x11-maximisee.png
+combo 125 16
+wait 500
+# Deuxième client X11 (OpenGL), au-dessus
+spawn glxgears
+wait-views 2 8000
+wait 800
+expect-views 2
+capture 03-glxgears.png
+# Fermeture par A-F4 (WM_DELETE_WINDOW)
+combo 56 62
+wait 1000
+expect-views 1
+combo 56 62
+wait 1000
+expect-views 0
+quit

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Packarch
+Comment=Bureau Packarch (compositeur Wayland à fenêtres flottantes)
+Exec=packarch
+Type=Application
+DesktopNames=packarch;wlroots

@@ -148,12 +148,8 @@ pub struct WindowRule {
     pub title: Option<String>,
     pub actions: Vec<Action>,
     pub server_decoration: Option<bool>,
-    // Barre des tâches, Alt+Tab, position fixe: 0.4
-    #[allow(dead_code)]
     pub skip_taskbar: Option<bool>,
-    #[allow(dead_code)]
     pub skip_window_switcher: Option<bool>,
-    #[allow(dead_code)]
     pub fixed_position: Option<bool>,
 }
 

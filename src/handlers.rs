@@ -15,8 +15,8 @@ use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_to
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_output, wl_seat, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::{Client, Resource};
-use smithay::utils::Serial;
 use smithay::utils::Transform;
+use smithay::utils::{Point, Serial};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     CompositorClientState, CompositorHandler, CompositorState, SurfaceData, get_parent, is_sync_subsurface,
@@ -25,7 +25,6 @@ use smithay::wayland::compositor::{
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::output::OutputHandler;
-use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler, set_data_device_focus,
 };
@@ -73,6 +72,10 @@ impl CompositorHandler for State {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        // Le client Xwayland porte les données de Smithay
+        if let Some(x) = client.get_data::<smithay::xwayland::XWaylandClientData>() {
+            return &x.compositor_state;
+        }
         &client.get_data::<ClientState>().unwrap().compositor_state
     }
 
@@ -100,39 +103,26 @@ impl CompositorHandler for State {
 impl State {
     fn commit_toplevel(&mut self, surface: &WlSurface) {
         let Some(i) = self.view_index(surface) else { return };
-        let toplevel = self.views[i].window.toplevel().unwrap().clone();
-        let initial_sent = with_states(surface, |s| {
-            s.data_map
-                .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-        if !initial_sent {
-            toplevel.with_pending_state(|s| s.decoration_mode = Some(DecoMode::ServerSide));
-            toplevel.send_configure();
-            return;
+        // Première configuration xdg (les fenêtres X11 n'en ont pas)
+        if let Some(toplevel) = self.views[i].window.toplevel().cloned() {
+            let initial_sent = with_states(surface, |s| {
+                s.data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .initial_configure_sent
+            });
+            if !initial_sent {
+                toplevel.with_pending_state(|s| s.decoration_mode = Some(DecoMode::ServerSide));
+                toplevel.send_configure();
+                return;
+            }
         }
         let has_buffer = with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or(false);
         let view = &mut self.views[i];
         if has_buffer && !view.mapped {
-            view.mapped = true;
-            if let Some(output) = self.outputs.first().cloned() {
-                use smithay::desktop::space::SpaceElement;
-                self.views[i]
-                    .window
-                    .output_enter(&output, self.output_geometry(&output));
-            }
-            self.place_new(i);
-            let i = self.focus_view(i, true);
-            self.appear(i, crate::render::Appear::Open);
-            info!(
-                "fenêtre: « {} » ({})",
-                self.views[i].title(),
-                self.views[i].app_id()
-            );
-            self.apply_rules(i);
+            self.map_view(i);
             return;
         }
         if !has_buffer && view.mapped {
@@ -217,6 +207,62 @@ impl State {
         }
     }
 
+    /// Première apparition d'une vue: placement, focus, animation, règles
+    pub fn map_view(&mut self, i: usize) {
+        self.views[i].mapped = true;
+        if let Some(output) = self.outputs.first().cloned() {
+            use smithay::desktop::space::SpaceElement;
+            self.views[i]
+                .window
+                .output_enter(&output, self.output_geometry(&output));
+        }
+        // Une fenêtre X11 qui demande une position visible la garde (§ 8.2)
+        let x11_pos = self.views[i].x11().map(|x| x.geometry().loc).filter(|p| {
+            *p != Point::from((0, 0)) && self.outputs.iter().any(|o| self.output_geometry(o).contains(*p))
+        });
+        match (x11_pos, self.parent_view(i)) {
+            (Some(p), _) => self.views[i].loc = p,
+            (None, Some(parent)) => self.center_on(i, parent),
+            (None, None) => self.place_new(i),
+        }
+        if self.views[i].x11().is_some() {
+            self.configure(i, None);
+        }
+        let i = self.focus_view(i, true);
+        self.appear(i, crate::render::Appear::Open);
+        info!(
+            "fenêtre: « {} » ({})",
+            self.views[i].title(),
+            self.views[i].app_id()
+        );
+        self.apply_rules(i);
+    }
+
+    /// Vue parente d'un dialogue (xdg parent, WM_TRANSIENT_FOR)
+    pub fn parent_view(&self, i: usize) -> Option<usize> {
+        if let Some(t) = self.views[i].window.toplevel() {
+            return t.parent().and_then(|p| self.view_index(&p));
+        }
+        let parent = self.views[i].x11()?.is_transient_for()?;
+        self.views
+            .iter()
+            .position(|v| v.x11().is_some_and(|x| x.window_id() == parent))
+    }
+
+    /// Centre une vue sur une autre, dans la zone utile (§ 8.1)
+    fn center_on(&mut self, i: usize, parent: usize) {
+        self.views[i].desktop = self.views[parent].desktop;
+        let p = self.frame_rect(parent);
+        let f = self.frame_rect(i);
+        let zone = self.view_zone(parent);
+        let x = (p.loc.x + (p.size.w - f.size.w) / 2)
+            .clamp(zone.loc.x, zone.loc.x + (zone.size.w - f.size.w).max(0));
+        let y = (p.loc.y + (p.size.h - f.size.h) / 2)
+            .clamp(zone.loc.y, zone.loc.y + (zone.size.h - f.size.h).max(0));
+        let layout = self.layout(&self.views[i]);
+        self.views[i].loc = Point::from((x, y)) + layout.client.loc;
+    }
+
     fn view_of(&self, surface: &ToplevelSurface) -> Option<usize> {
         self.view_index(surface.wl_surface())
     }
@@ -291,7 +337,7 @@ delegate_fractional_scale!(State);
 // --- Siège, presse-papiers, écrans ----------------------------------------
 
 impl SeatHandler for State {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = crate::state::KbFocus;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -303,15 +349,11 @@ impl SeatHandler for State {
         self.cursor_status = image;
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
-        let client = focused.and_then(|s| self.dh.get_client(s.id()).ok());
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&crate::state::KbFocus>) {
+        let client = focused.and_then(|f| self.dh.get_client(f.surface.id()).ok());
         set_data_device_focus(&self.dh, seat, client.clone());
         set_primary_focus(&self.dh, seat, client);
     }
-}
-
-impl SelectionHandler for State {
-    type SelectionUserData = ();
 }
 
 impl DataDeviceHandler for State {
@@ -361,8 +403,11 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        self.views
-            .push(View::new(Window::new_wayland_window(surface), self.desktop));
+        self.views.push(View::new(
+            Window::new_wayland_window(surface.clone()),
+            surface.wl_surface().clone(),
+            self.desktop,
+        ));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -406,7 +451,10 @@ impl XdgShellHandler for State {
         let Ok(root) = find_popup_root_surface(&kind) else {
             return;
         };
-        let Ok(mut grab) = self.popups.grab_popup(root, kind, &seat, serial) else {
+        let Ok(mut grab) = self
+            .popups
+            .grab_popup(crate::state::KbFocus::from(root), kind, &seat, serial)
+        else {
             return;
         };
         if let Some(keyboard) = seat.get_keyboard() {
