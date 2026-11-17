@@ -184,8 +184,10 @@ src/
 
 ### 5.2 `rc.xml`
 
-Format XML à la Openbox, racine `<labwc_config>` ou `<openbox_config>`
-(acceptées toutes les deux, pour reprendre les fichiers existants).
+Format XML à la Openbox. Racine `<packarch_config>`, celle des fichiers
+écrits par Packarch. `<openbox_config>` et `<labwc_config>` sont aussi
+acceptées, pour lire sans retouche un `rc.xml` existant (le contenu est le
+même, seul le nom de la racine change).
 Les noms d'éléments et d'attributs ne tiennent pas compte de la casse ;
 `yes/no`, `true/false`, `on/off` sont acceptés comme booléens.
 Un élément inconnu est ignoré avec un avertissement dans le journal.
@@ -724,8 +726,7 @@ Décidé le 17 novembre 2026 :
 2. Dossier de configuration propre : `~/.config/packarch/`.
 3. Animations prévues (§ 10.5), dès la version 0.3.
 
-Reste ouvert :
+4. Racine de `rc.xml` : `<packarch_config>` dans les fichiers de Packarch ;
+   `<openbox_config>` et `<labwc_config>` acceptées en lecture (§ 5.2).
 
-1. Racine XML de `rc.xml` : garder `<labwc_config>` accepté à long terme,
-   ou n'accepter que `<openbox_config>` (et une racine à nous,
-   `<packarch_config>`) ?
+Aucune question ouverte pour l'instant.
