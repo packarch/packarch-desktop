@@ -50,7 +50,6 @@ use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
-use smithay::wayland::xdg_toplevel_icon::{XdgToplevelIconHandler, XdgToplevelIconManager};
 use smithay::{
     delegate_alpha_modifier, delegate_content_type, delegate_cursor_shape, delegate_data_control,
     delegate_ext_data_control, delegate_foreign_toplevel_list, delegate_idle_inhibit, delegate_idle_notify,
@@ -58,7 +57,6 @@ use smithay::{
     delegate_pointer_gestures, delegate_presentation, delegate_relative_pointer, delegate_security_context,
     delegate_session_lock, delegate_single_pixel_buffer, delegate_text_input_manager,
     delegate_virtual_keyboard_manager, delegate_xdg_activation, delegate_xdg_dialog,
-    delegate_xdg_toplevel_icon,
 };
 use tracing::{info, warn};
 
@@ -84,7 +82,6 @@ pub struct Protocols {
     pub data_control: DataControlState,
     pub ext_data_control: ExtDataControlState,
     pub security_context: SecurityContextState,
-    pub toplevel_icon: XdgToplevelIconManager,
     pub input_method: InputMethodManagerState,
     pub text_input: TextInputManagerState,
     pub virtual_keyboard: VirtualKeyboardManagerState,
@@ -119,7 +116,6 @@ impl Protocols {
             data_control: DataControlState::new::<State, _>(dh, Some(primary), trusted),
             ext_data_control: ExtDataControlState::new::<State, _>(dh, Some(primary), trusted),
             security_context: SecurityContextState::new::<State, _>(dh, trusted),
-            toplevel_icon: XdgToplevelIconManager::new::<State>(dh),
             input_method: InputMethodManagerState::new::<State, _>(dh, trusted),
             text_input: TextInputManagerState::new::<State>(dh),
             virtual_keyboard: VirtualKeyboardManagerState::new::<State, _>(dh, trusted),
@@ -347,10 +343,10 @@ impl SecurityContextHandler for State {
 
 delegate_security_context!(State);
 
-// --- Icônes, dialogues ----------------------------------------------------
-
-impl XdgToplevelIconHandler for State {}
-delegate_xdg_toplevel_icon!(State);
+// --- Dialogues -----------------------------------------------------------
+// xdg-toplevel-icon n'est pas proposé: avec Smithay 0.7, la première
+// configuration d'une fenêtre qui pose une icône (applications Qt) n'est
+// jamais envoyée
 
 impl XdgDialogHandler for State {}
 delegate_xdg_dialog!(State);

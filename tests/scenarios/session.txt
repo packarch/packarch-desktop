@@ -6,6 +6,14 @@ wait-views 1 8000
 spawn kitty --config NONE -o confirm_os_window_close=0 -T deux -e sh -c 'echo Deux; sleep 120'
 wait-views 2 8000
 wait 800
+# Application Qt qui pose une icône de fenêtre (bloquée avec xdg-toplevel-icon)
+spawn QT_QPA_PLATFORM=wayland mkvtoolnix-gui
+wait-views 3 15000
+wait 1000
+expect-views 3
+combo 56 62
+wait 1500
+expect-views 2
 # Capture d'écran (wlr-screencopy)
 spawn grim grim.png
 expect-file grim.png 5000
