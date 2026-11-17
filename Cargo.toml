@@ -1,0 +1,31 @@
+[package]
+name = "packarch-rwdesktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Compositeur Wayland à fenêtres flottantes de Packarch"
+publish = false
+
+[[bin]]
+name = "packarch"
+path = "src/main.rs"
+
+[dependencies]
+smithay = { version = "0.7.0", default-features = false, features = [
+    "backend_winit",
+    "backend_egl",
+    "backend_drm",
+    "renderer_gl",
+    "wayland_frontend",
+    "desktop",
+] }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+roxmltree = "0.21"
+cosmic-text = "0.14"
+png = "0.17"
+anyhow = "1"
+
+[profile.release]
+debug = "line-tables-only"

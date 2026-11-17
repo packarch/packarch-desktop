@@ -6,8 +6,24 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : cahier des charges, pas encore de code. Voir
-[docs/cahier-des-charges.md](docs/cahier-des-charges.md).
+État : **prototype 0.1** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+§ 14). Fenêtres xdg-shell décorées par le compositeur (thème Openbox, coins
+arrondis, ombres), couches layer-shell (waybar, swaybg), déplacement,
+redimensionnement, maximisation, fermeture. Pas encore de raccourcis, de
+menus ni de session réelle (backend udev).
+
+## Essayer
+
+```sh
+cargo build
+# Dans une fenêtre de la session en cours, avec la config de labwc :
+./target/debug/packarch -C ~/.config/labwc -s waybar -s kitty
+# Sans écran, captures d'un scénario d'essai dans target/captures :
+tests/capture.sh
+```
+
+Options cachées pour les essais : `--backend headless`, `--size 1920x1200`,
+`--scale 1.5`, `--script FICHIER` (format décrit dans `src/script.rs`).
 
 ## Licence
 
