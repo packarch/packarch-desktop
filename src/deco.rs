@@ -39,6 +39,21 @@ pub fn line_height(font: &Font) -> i32 {
     (font_px(font) * 1.35).ceil() as i32
 }
 
+/// Parties du cadre affichées
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Frame {
+    pub title: bool,
+    pub border: bool,
+}
+
+#[cfg(test)]
+impl Frame {
+    pub const FULL: Frame = Frame {
+        title: true,
+        border: true,
+    };
+}
+
 /// Disposition du cadre d'une vue, en coordonnées relatives au coin haut
 /// gauche du cadre
 #[derive(Debug, Clone, PartialEq)]
@@ -56,21 +71,30 @@ impl Layout {
         line_height(&config.font_active).max(line_height(&config.font_inactive)) + 2 * theme.padding_height
     }
 
-    pub fn new(config: &Config, theme: &Theme, client: Size<i32, Logical>) -> Layout {
-        let b = theme.border_width;
-        let th = Layout::title_height(config, theme);
+    pub fn new(config: &Config, theme: &Theme, client: Size<i32, Logical>, frame: Frame) -> Layout {
+        let b = if frame.border { theme.border_width } else { 0 };
+        let th = if frame.title {
+            Layout::title_height(config, theme)
+        } else {
+            0
+        };
         let size = Size::from((client.w + 2 * b, client.h + th + 2 * b));
         let pad = theme.padding_width;
         let bw = line_height(&config.font_active) + pad;
         let mut buttons = vec![];
+        let (left, right): (&[Button], &[Button]) = if frame.title {
+            (&config.buttons_left, &config.buttons_right)
+        } else {
+            (&[], &[])
+        };
         let mut x = b + pad / 2;
-        for &btn in &config.buttons_left {
+        for &btn in left {
             buttons.push((btn, Rectangle::new((x, b).into(), (bw, th).into())));
             x += bw;
         }
         let left_end = x;
         let mut x = size.w - b - pad / 2;
-        for &btn in config.buttons_right.iter().rev() {
+        for &btn in right.iter().rev() {
             x -= bw;
             buttons.push((btn, Rectangle::new((x, b).into(), (bw, th).into())));
         }
@@ -94,6 +118,9 @@ impl Layout {
     /// et de la zone de saisie, ou sur le client
     pub fn part_at(&self, p: Point<f64, Logical>) -> Option<Part> {
         let (w, h) = (self.size.w as f64, self.size.h as f64);
+        if self.border == 0 && self.title_height == 0 {
+            return None;
+        }
         let g = GRAB as f64;
         if p.x < -g || p.y < -g || p.x >= w + g || p.y >= h + g {
             return None;
@@ -312,7 +339,7 @@ mod tests {
         let mut rc = ThemeRc::default();
         rc.parse("border.width: 2\npadding.width: 8\npadding.height: 10\n");
         let theme = Theme::from_rc("test", &rc, None);
-        Layout::new(&Config::default(), &theme, (400, 300).into())
+        Layout::new(&Config::default(), &theme, (400, 300).into(), Frame::FULL)
     }
 
     #[test]

@@ -50,9 +50,10 @@ use smithay::{
 use tracing::{debug, info};
 
 use crate::deco::Edges;
-use crate::input::{MoveGrab, ResizeGrab};
+use crate::input::MoveGrab;
 use crate::state::{ClientState, State};
-use crate::view::{Resize, View};
+use crate::view::{Axis, Tiling, View};
+use crate::wm::Origin;
 
 // --- Surfaces -------------------------------------------------------------
 
@@ -123,10 +124,14 @@ impl State {
                     .window
                     .output_enter(&output, self.output_geometry(&output));
             }
-            self.place(i);
-            self.focus_view(i);
-            let i = self.view_index(surface).unwrap();
-            info!("fenêtre: « {} »", self.views[i].title());
+            self.place_new(i);
+            let i = self.focus_view(i, true);
+            info!(
+                "fenêtre: « {} » ({})",
+                self.views[i].title(),
+                self.views[i].app_id()
+            );
+            self.apply_rules(i);
             return;
         }
         if !has_buffer && view.mapped {
@@ -341,12 +346,22 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        self.views.push(View::new(Window::new_wayland_window(surface)));
+        self.views
+            .push(View::new(Window::new_wayland_window(surface), self.desktop));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(i) = self.view_of(&surface) {
-            self.views.remove(i);
+            let view = self.views.remove(i);
+            self.mru.retain(|w| *w != view.window);
+            if let Some(c) = self.cycle.as_mut() {
+                c.windows.retain(|w| *w != view.window);
+                if c.windows.is_empty() {
+                    self.cycle = None;
+                } else {
+                    c.index = c.index.min(c.windows.len() - 1);
+                }
+            }
             self.focus_top();
         }
     }
@@ -406,7 +421,15 @@ impl XdgShellHandler for State {
             return;
         };
         let Some(i) = self.view_of(&surface) else { return };
-        self.start_move(i, start, serial);
+        let Some(pointer) = seat.get_pointer() else { return };
+        let grab = MoveGrab {
+            start,
+            window: self.views[i].window.clone(),
+            initial_loc: self.views[i].loc,
+            keyboard: false,
+            snap: None,
+        };
+        pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 
     fn resize_request(
@@ -430,98 +453,74 @@ impl XdgShellHandler for State {
             top: matches!(edges, E::Top | E::TopLeft | E::TopRight),
             bottom: matches!(edges, E::Bottom | E::BottomLeft | E::BottomRight),
         };
-        self.start_resize(i, e, start, serial);
+        let origin = Origin {
+            button: Some(start.button),
+            location: start.location,
+        };
+        self.start_resize_edges(i, e, origin);
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        if let Some(i) = self.view_of(&surface)
-            && self.views[i].maximized.is_none()
-        {
-            self.toggle_maximize(i);
+        if let Some(i) = self.view_of(&surface) {
+            self.maximize(i, Axis::Both);
         }
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(i) = self.view_of(&surface)
-            && self.views[i].maximized.is_some()
+            && matches!(self.views[i].tiling, Tiling::Maximized(_))
         {
-            self.toggle_maximize(i);
+            self.restore(i);
         }
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<wl_output::WlOutput>) {
-        // Plein écran: étape 0.2; on répond par la configuration courante
-        surface.send_pending_configure();
+        match self.view_of(&surface) {
+            Some(i) if self.views[i].tiling != Tiling::Fullscreen => self.toggle_fullscreen(i),
+            _ => {
+                surface.send_pending_configure();
+            }
+        }
     }
 
-    fn minimize_request(&mut self, _surface: ToplevelSurface) {
-        debug!("réduction demandée: prévue avec la barre des tâches (0.4)");
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        if let Some(i) = self.view_of(&surface)
+            && self.views[i].tiling == Tiling::Fullscreen
+        {
+            self.toggle_fullscreen(i);
+        }
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(i) = self.view_of(&surface) {
+            self.iconify(i);
+        }
     }
 
     fn title_changed(&mut self, _surface: ToplevelSurface) {}
 }
 
-impl State {
-    pub fn start_move(
-        &mut self,
-        i: usize,
-        start: smithay::input::pointer::GrabStartData<State>,
-        serial: Serial,
-    ) {
-        let Some(pointer) = self.seat.get_pointer() else {
-            return;
-        };
-        let view = &self.views[i];
-        let grab = MoveGrab {
-            start,
-            window: view.window.clone(),
-            initial_loc: view.loc,
-        };
-        pointer.set_grab(self, grab, serial, Focus::Clear);
-    }
-
-    pub fn start_resize(
-        &mut self,
-        i: usize,
-        edges: Edges,
-        start: smithay::input::pointer::GrabStartData<State>,
-        serial: Serial,
-    ) {
-        let Some(pointer) = self.seat.get_pointer() else {
-            return;
-        };
-        let view = &mut self.views[i];
-        let size = view.window.geometry().size;
-        view.resize = Some(Resize {
-            edges,
-            initial_loc: view.loc,
-            initial_size: size,
-            ending: false,
-        });
-        let toplevel = view.window.toplevel().unwrap().clone();
-        toplevel.with_pending_state(|s| s.states.set(xdg_toplevel::State::Resizing));
-        toplevel.send_pending_configure();
-        let grab = ResizeGrab {
-            start,
-            window: view.window.clone(),
-            edges,
-            initial_size: size,
-        };
-        pointer.set_grab(self, grab, serial, Focus::Clear);
-    }
-}
-
 delegate_xdg_shell!(State);
 
-// --- Décorations: toujours dessinées par le compositeur -------------------
+// --- Décorations ----------------------------------------------------------
 
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
         toplevel.with_pending_state(|s| s.decoration_mode = Some(DecoMode::ServerSide));
     }
 
-    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecoMode) {
-        toplevel.with_pending_state(|s| s.decoration_mode = Some(DecoMode::ServerSide));
+    /// `core/decoration` à `server`: le cadre du compositeur, toujours;
+    /// à `client`: celui que le client demande
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecoMode) {
+        let mode = if self.config.server_decoration {
+            DecoMode::ServerSide
+        } else {
+            mode
+        };
+        if let Some(i) = self.view_of(&toplevel) {
+            self.views[i].decorated = mode == DecoMode::ServerSide;
+        }
+        toplevel.with_pending_state(|s| s.decoration_mode = Some(mode));
         if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
         }

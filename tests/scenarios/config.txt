@@ -1,0 +1,125 @@
+# Version 0.2: raccourcis (AZERTY), liaisons de la souris, collage,
+# bureaux, rechargement. Lancé par tests/capture.sh avec le rc.xml de
+# Packarch (résistance des bords désactivée pour des déplacements exacts).
+wait 1000
+# Molette sur le bureau (liaison Root Scroll): bureau suivant, puis retour
+move 640 400
+scroll down
+expect-desktop 2
+scroll up
+expect-desktop 1
+spawn kitty --config NONE -o confirm_os_window_close=0 -T un -e sh -c 'echo Un; sleep 120'
+wait-views 1 8000
+wait 400
+spawn kitty --config NONE -o confirm_os_window_close=0 -T deux -e sh -c 'echo Deux; sleep 120'
+wait-views 2 8000
+wait 800
+expect-focus deux
+# --- Clavier ---
+# W-Right: collage à droite; W-a (touche A d'un AZERTY): maximiser, puis retour au collage
+combo 125 106
+wait 300
+expect deux 640 38 640 724
+combo 125 16
+wait 300
+expect deux 0 38 1280 724
+combo 125 16
+wait 400
+expect deux 640 38 640 724
+# W-KP_1: région bas-gauche
+combo 125 79
+wait 300
+expect deux 0 400 640 362
+# W-Down: UnMaximize, UnSnap, AutoPlace center
+combo 125 108
+wait 400
+# A-Tab: retour à « un »
+combo 56 15
+wait 200
+expect-focus un
+# W-A-Right (MoveRelative x=20)
+mark un
+combo 125 56 106
+expect-moved un 20 0
+# A-F7: enrouler, puis dérouler
+combo 56 65
+expect-shaded un yes
+wait 300
+capture 20-enroulee.png
+combo 56 65
+expect-shaded un no
+# A-F5: réduire; A-Tab la fait revenir
+combo 56 63
+expect-visible un no
+expect-focus deux
+combo 56 15
+wait 200
+expect-visible un yes
+expect-focus un
+# W-S-d: montrer le bureau, deux fois
+combo 125 42 32
+expect-visible un no
+combo 125 42 32
+expect-visible un yes
+# C-S-r: recharger la configuration
+combo 29 42 19
+wait 300
+# --- Souris ---
+# Glisser la barre de titre
+point un title
+mark un
+press left
+move-by -30 10
+move-by -70 30
+release left
+wait 200
+expect-moved un -100 40
+# Super + glisser dans le client (contexte Frame, W-Left Drag)
+point un client
+mark un
+keydown 125
+press left
+move-by 20 20
+move-by 30 40
+release left
+keyup 125
+wait 200
+expect-moved un 50 60
+# Glisser jusqu'au bord gauche: aperçu, puis collage
+point un title
+press left
+move-by -100 0
+move 4 300
+wait 200
+capture 21-apercu.png
+release left
+wait 400
+expect un 0 38 640 724
+capture 22-colle.png
+# Double clic sur le titre: maximiser
+point un title
+click left
+click left
+wait 300
+expect un 0 38 1280 724
+point un max
+click left
+wait 300
+expect un 0 38 640 724
+# Molette sur la barre de titre: enroulée (Down), déroulée (Up)
+point un title
+scroll down
+expect-shaded un yes
+scroll up
+expect-shaded un no
+# Bouton de réduction
+point deux iconify
+click left
+wait 200
+expect-visible deux no
+# Bouton de fermeture de « un »
+point un close
+click left
+wait 1000
+capture 23-fin.png
+quit

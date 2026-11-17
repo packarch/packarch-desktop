@@ -13,6 +13,20 @@
 //! release left
 //! click left
 //! key 30                 touche (code evdev), appui puis relâche
+//! keydown 125            touche enfoncée (modificateur…), keyup pour la relâcher
+//! combo 125 42 3         touches enfoncées dans l'ordre puis relâchées à l'envers
+//! scroll down            un cran de molette (up, down, left, right)
+//! reconfigure            comme SIGHUP
+//! point un title         pointeur sur une partie de la vue de titre « un »:
+//!                        title, client, close, max, iconify, br (coin bas droit)
+//! expect-desktop 2       vérifie le bureau affiché (numéro à partir de 1)
+//! expect-focus un        vérifie la vue qui a le clavier
+//! expect un 10 38 640 724  vérifie le cadre d'une vue (x y largeur hauteur)
+//! move-by 50 -20         déplace le pointeur
+//! mark un                retient le cadre de la vue « un »
+//! expect-moved un 50 -20 vérifie son déplacement depuis `mark`
+//! expect-shaded un yes   vérifie l'enroulement (yes/no)
+//! expect-visible un no   vérifie l'affichage (réduite, autre bureau…)
 //! capture /tmp/a.png     capture de l'écran (backend headless)
 //! quit
 //! ```
@@ -38,6 +52,19 @@ pub enum Step {
     Button(u32, bool),
     Click(u32),
     Key(u32),
+    KeyState(u32, bool),
+    Combo(Vec<u32>),
+    Scroll(f64, f64),
+    Reconfigure,
+    Point(String, String),
+    ExpectDesktop(usize),
+    ExpectFocus(String),
+    Expect(String, [i32; 4]),
+    MoveBy(f64, f64),
+    Mark(String),
+    ExpectMoved(String, i32, i32),
+    ExpectShaded(String, bool),
+    ExpectVisible(String, bool),
     Capture(PathBuf),
     Quit,
 }
@@ -80,6 +107,63 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 "release" => Step::Button(button(args.next())?, false),
                 "click" => Step::Click(button(args.next())?),
                 "key" => Step::Key(num(args.next())? as u32),
+                "keydown" => Step::KeyState(num(args.next())? as u32, true),
+                "keyup" => Step::KeyState(num(args.next())? as u32, false),
+                "combo" => Step::Combo(
+                    args.map(|a| a.parse::<u32>().map_err(|e| e.to_string()))
+                        .collect::<Result<_, _>>()?,
+                ),
+                "scroll" => match args.next() {
+                    Some("up") => Step::Scroll(0.0, -1.0),
+                    Some("down") => Step::Scroll(0.0, 1.0),
+                    Some("left") => Step::Scroll(-1.0, 0.0),
+                    Some("right") => Step::Scroll(1.0, 0.0),
+                    d => return Err(format!("sens inconnu: {d:?}")),
+                },
+                "reconfigure" => Step::Reconfigure,
+                "point" => {
+                    let (title, part) = rest.rsplit_once(' ').ok_or("point TITRE PARTIE")?;
+                    Step::Point(title.trim().to_string(), part.to_string())
+                }
+                "move-by" => Step::MoveBy(num(args.next())?, num(args.next())?),
+                "mark" => Step::Mark(rest.to_string()),
+                "expect-moved" | "expect-shaded" | "expect-visible" => {
+                    let v: Vec<&str> = rest.split_whitespace().collect();
+                    let n = v.len();
+                    if cmd == "expect-moved" {
+                        if n < 3 {
+                            return Err("expect-moved TITRE dx dy".into());
+                        }
+                        let dx = v[n - 2].parse().map_err(|_| "dx")?;
+                        let dy = v[n - 1].parse().map_err(|_| "dy")?;
+                        Step::ExpectMoved(v[..n - 2].join(" "), dx, dy)
+                    } else {
+                        if n < 2 {
+                            return Err(format!("{cmd} TITRE yes|no"));
+                        }
+                        let b = crate::config::parse_bool(v[n - 1]).ok_or("yes ou no")?;
+                        let t = v[..n - 1].join(" ");
+                        if cmd == "expect-shaded" {
+                            Step::ExpectShaded(t, b)
+                        } else {
+                            Step::ExpectVisible(t, b)
+                        }
+                    }
+                }
+                "expect-desktop" => Step::ExpectDesktop(num(args.next())? as usize),
+                "expect-focus" => Step::ExpectFocus(rest.to_string()),
+                "expect" => {
+                    let v: Vec<&str> = rest.split_whitespace().collect();
+                    if v.len() < 5 {
+                        return Err("expect TITRE x y largeur hauteur".into());
+                    }
+                    let n = v.len();
+                    let nums: Vec<i32> = v[n - 4..]
+                        .iter()
+                        .map(|x| x.parse().map_err(|_| format!("nombre: {x}")))
+                        .collect::<Result<_, _>>()?;
+                    Step::Expect(v[..n - 4].join(" "), [nums[0], nums[1], nums[2], nums[3]])
+                }
                 "capture" => Step::Capture(PathBuf::from(rest)),
                 "quit" => Step::Quit,
                 _ => return Err(format!("commande inconnue: {cmd}")),
@@ -91,10 +175,52 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
     Ok(steps)
 }
 
+/// Échec d'une vérification: message, et code de sortie 2 à la fin
+fn fail(state: &mut State, msg: String) {
+    warn!("script: ÉCHEC: {msg}");
+    FAILED.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = state;
+}
+
+/// Une vérification a échoué
+pub static FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Position d'une partie d'une vue
+fn point(
+    state: &State,
+    title: &str,
+    part: &str,
+) -> Option<smithay::utils::Point<f64, smithay::utils::Logical>> {
+    use crate::config::Button;
+    let i = state.views.iter().position(|v| v.title() == title)?;
+    let layout = state.layout(&state.views[i]);
+    let frame = state.frame_rect(i).loc.to_f64();
+    let center = |r: smithay::utils::Rectangle<i32, smithay::utils::Logical>| {
+        frame + r.loc.to_f64() + r.size.to_f64().to_point().downscale(2.0)
+    };
+    let button = |b: Button| {
+        layout
+            .buttons
+            .iter()
+            .find(|(x, _)| *x == b)
+            .map(|(_, r)| center(*r))
+    };
+    match part {
+        "title" => Some(center(layout.title)),
+        "client" => Some(center(layout.client)),
+        "close" => button(Button::Close),
+        "max" => button(Button::Maximize),
+        "iconify" => button(Button::Iconify),
+        "br" => Some(frame + layout.size.to_f64().to_point() + smithay::utils::Point::from((2.0, 2.0))),
+        _ => None,
+    }
+}
+
 /// Exécute le scénario dans la boucle d'événements
 pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
     let mut steps = std::collections::VecDeque::from(steps);
     let mut waiting_since: Option<Instant> = None;
+    let mut marks: Vec<(String, smithay::utils::Point<i32, smithay::utils::Logical>)> = vec![];
     let _ = handle.insert_source(
         Timer::from_duration(Duration::from_millis(100)),
         move |_, _, state| {
@@ -102,7 +228,7 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                 return TimeoutAction::Drop;
             };
             let mut delay = 10;
-            match step {
+            match step.clone() {
                 Step::Spawn(cmd) => state.spawn(&cmd),
                 Step::Wait(ms) => delay = ms,
                 Step::WaitViews(n, timeout) => {
@@ -131,6 +257,114 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                     let t = state.start.elapsed().as_millis() as u32;
                     state.key(Keycode::new(code + 8), true, t);
                     state.key(Keycode::new(code + 8), false, t + 1);
+                }
+                Step::KeyState(code, pressed) => {
+                    let t = state.start.elapsed().as_millis() as u32;
+                    state.key(Keycode::new(code + 8), pressed, t);
+                }
+                Step::Combo(codes) => {
+                    let t = state.start.elapsed().as_millis() as u32;
+                    for c in &codes {
+                        state.key(Keycode::new(c + 8), true, t);
+                    }
+                    for c in codes.iter().rev() {
+                        state.key(Keycode::new(c + 8), false, t + 1);
+                    }
+                }
+                Step::Scroll(x, y) => {
+                    use smithay::backend::input::{Axis, AxisSource};
+                    let t = state.start.elapsed().as_millis() as u32;
+                    let mut frame = smithay::input::pointer::AxisFrame::new(t).source(AxisSource::Wheel);
+                    for (axis, v) in [(Axis::Horizontal, x), (Axis::Vertical, y)] {
+                        if v != 0.0 {
+                            frame = frame.value(axis, v * 15.0).v120(axis, (v * 120.0) as i32);
+                        }
+                    }
+                    state.pointer_axis(frame, (x, y));
+                }
+                Step::Reconfigure => state.reconfigure(),
+                Step::Point(title, part) => match point(state, &title, &part) {
+                    Some(p) => state.pointer_motion(p, state.start.elapsed().as_millis() as u32),
+                    None => fail(
+                        state,
+                        format!("point: pas de vue « {title} » ou partie « {part} »"),
+                    ),
+                },
+                Step::MoveBy(dx, dy) => {
+                    let p = state.pointer + smithay::utils::Point::from((dx, dy));
+                    state.pointer_motion(p, state.start.elapsed().as_millis() as u32);
+                }
+                Step::Mark(title) => match state.views.iter().position(|v| v.title() == title) {
+                    Some(i) => {
+                        let f = state.frame_rect(i);
+                        marks.retain(|(t, _)| *t != title);
+                        marks.push((title, f.loc));
+                    }
+                    None => fail(state, format!("pas de vue « {title} »")),
+                },
+                Step::ExpectMoved(title, dx, dy) => {
+                    let i = state.views.iter().position(|v| v.title() == title);
+                    let m = marks.iter().find(|(t, _)| *t == title).map(|(_, p)| *p);
+                    match (i, m) {
+                        (Some(i), Some(m)) => {
+                            let d = state.frame_rect(i).loc - m;
+                            if (d.x, d.y) != (dx, dy) {
+                                fail(
+                                    state,
+                                    format!(
+                                        "« {title} » déplacée de ({}, {}) au lieu de ({dx}, {dy})",
+                                        d.x, d.y
+                                    ),
+                                );
+                            }
+                        }
+                        _ => fail(state, format!("expect-moved: « {title} » sans mark")),
+                    }
+                }
+                Step::ExpectShaded(title, b) | Step::ExpectVisible(title, b) => {
+                    let shaded = matches!(step, Step::ExpectShaded(..));
+                    match state.views.iter().position(|v| v.title() == title) {
+                        Some(i) => {
+                            let got = if shaded {
+                                state.views[i].shaded
+                            } else {
+                                state.visible(&state.views[i])
+                            };
+                            if got != b {
+                                let what = if shaded { "enroulée" } else { "affichée" };
+                                fail(state, format!("« {title} » {what}: {got} au lieu de {b}"));
+                            }
+                        }
+                        None => fail(state, format!("pas de vue « {title} »")),
+                    }
+                }
+                Step::ExpectDesktop(d) => {
+                    if state.desktop + 1 != d {
+                        fail(state, format!("bureau {} au lieu de {d}", state.desktop + 1));
+                    }
+                }
+                Step::ExpectFocus(title) => {
+                    let got = state
+                        .focused_view()
+                        .map(|i| state.views[i].title())
+                        .unwrap_or_default();
+                    if got != title {
+                        fail(state, format!("focus sur « {got} » au lieu de « {title} »"));
+                    }
+                }
+                Step::Expect(title, [x, y, w, h]) => {
+                    match state.views.iter().position(|v| v.title() == title) {
+                        Some(i) => {
+                            let f = state.frame_rect(i);
+                            if [f.loc.x, f.loc.y, f.size.w, f.size.h] != [x, y, w, h] {
+                                fail(
+                                    state,
+                                    format!("« {title} »: cadre {:?} au lieu de {:?}", f, [x, y, w, h]),
+                                );
+                            }
+                        }
+                        None => fail(state, format!("pas de vue « {title} »")),
+                    }
                 }
                 Step::Capture(path) => match state.backend.as_mut() {
                     Some(Backend::Headless(h)) => {

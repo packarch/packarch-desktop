@@ -6,11 +6,14 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : **prototype 0.1** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
-§ 14). Fenêtres xdg-shell décorées par le compositeur (thème Openbox, coins
-arrondis, ombres), couches layer-shell (waybar, swaybg), déplacement,
-redimensionnement, maximisation, fermeture. Pas encore de raccourcis, de
-menus ni de session réelle (backend udev).
+État : **version 0.2** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+§ 14). Fenêtres décorées par le compositeur (thème Openbox, coins arrondis,
+ombres), couches layer-shell (waybar, swaybg), `rc.xml` complet pour les
+réglages de Packarch : raccourcis (y compris en AZERTY), liaisons de la
+souris, 33 actions, bureaux, collage aux bords et aux régions, résistance des
+bords, règles de fenêtres, `environment`, `autostart`, rechargement
+(`packarch --reconfigure` ou Ctrl+Maj+R). Pas encore de menus (0.3) ni de
+session réelle (backend udev, 0.4).
 
 ## Essayer
 
@@ -18,7 +21,7 @@ menus ni de session réelle (backend udev).
 cargo build
 # Dans une fenêtre de la session en cours, avec la config de labwc :
 ./target/debug/packarch -C ~/.config/labwc -s waybar -s kitty
-# Sans écran, captures d'un scénario d'essai dans target/captures :
+# Sans écran, scénarios d'essai (tests/scenarios), captures dans target/captures :
 tests/capture.sh
 ```
 

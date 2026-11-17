@@ -252,6 +252,14 @@ fn pixel(
     PixelShaderElement::new(program.clone(), area, None, 1.0, uniforms, Kind::Unspecified)
 }
 
+/// Programmes des shaders, copiés pour la durée d'un rendu
+#[derive(Clone)]
+struct Progs {
+    frame: GlesPixelProgram,
+    shadow: GlesPixelProgram,
+    clip: GlesTexProgram,
+}
+
 /// Éléments de rendu d'un écran, du premier plan vers l'arrière-plan
 pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Output) -> Vec<Elem> {
     let scale = output.current_scale().fractional_scale();
@@ -260,11 +268,11 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
     let Some(shaders) = state.shaders.as_ref() else {
         return elements;
     };
-    let (frame_prog, shadow_prog, clip_prog) = (
-        shaders.frame.clone(),
-        shaders.shadow.clone(),
-        shaders.clip.clone(),
-    );
+    let progs = Progs {
+        frame: shaders.frame.clone(),
+        shadow: shaders.shadow.clone(),
+        clip: shaders.clip.clone(),
+    };
 
     let layer_elements = |renderer: &mut GlesRenderer, layer: Layer| -> Vec<Elem> {
         let map = layer_map_for_output(output);
@@ -279,28 +287,77 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         out
     };
 
+    let stacking = state.stacking();
+    let full = state.fullscreen_top();
     elements.extend(layer_elements(renderer, Layer::Overlay));
+    if let Some(i) = full {
+        elements.extend(view_elements(state, renderer, i, scale, output_loc, &progs));
+    }
     elements.extend(layer_elements(renderer, Layer::Top));
 
-    let focused = state.focused_root();
-    let config = state.config.clone();
-    let theme = state.theme.clone();
-    for i in (0..state.views.len()).rev() {
-        let view = &state.views[i];
-        if !view.mapped || view.minimized {
-            continue;
-        }
-        let geo = view.window.geometry();
-        let active = focused.as_ref() == Some(view.surface());
-        let maximized = view.maximized.is_some();
-        let layout = Layout::new(&config, &theme, geo.size);
-        let colors = if active { &theme.active } else { &theme.inactive };
-        let frame_loc = view.loc - layout.client.loc - output_loc;
-        let client_loc = view.loc - output_loc;
-        let radius = if maximized { 0 } else { config.corner_radius } as f32;
+    // Aperçu du collage, devant les fenêtres
+    if let Some(rect) = state.snap_preview {
+        let c = state.theme.active.title_bg;
+        let fill = crate::theme::Color::rgba(c.r, c.g, c.b, 0.35);
+        let border = state.theme.active.label_text;
+        let radius = state.config.corner_radius as f32;
+        elements.push(Elem::Pixel(pixel(
+            &progs.frame,
+            Rectangle::new(rect.loc - output_loc, rect.size),
+            vec![
+                Uniform::new(
+                    "border_color",
+                    crate::theme::Color::rgba(border.r, border.g, border.b, 0.5).premultiplied(),
+                ),
+                Uniform::new("title_color", fill.premultiplied()),
+                Uniform::new("radius_top", radius),
+                Uniform::new("radius_bottom", radius),
+                Uniform::new("border", 2.0f32),
+                Uniform::new("title_height", (rect.size.h - 4).max(0) as f32),
+                Uniform::new("px", px(scale)),
+            ],
+        )));
+    }
 
-        // Fenêtres surgissantes (menus des applications), devant le cadre
-        let surface = view.surface().clone();
+    for &i in stacking.iter().rev() {
+        if Some(i) != full {
+            elements.extend(view_elements(state, renderer, i, scale, output_loc, &progs));
+        }
+    }
+
+    elements.extend(layer_elements(renderer, Layer::Bottom));
+    elements.extend(layer_elements(renderer, Layer::Background));
+    elements
+}
+
+/// Éléments d'une vue: fenêtres surgissantes, titre et boutons, cadre,
+/// contenu, ombre
+fn view_elements(
+    state: &mut State,
+    renderer: &mut GlesRenderer,
+    i: usize,
+    scale: f64,
+    output_loc: Point<i32, Logical>,
+    progs: &Progs,
+) -> Vec<Elem> {
+    let mut elements: Vec<Elem> = vec![];
+    let focused = state.focused_root();
+    let layout = state.layout(&state.views[i]);
+    let config = &state.config;
+    let theme = &state.theme;
+    let view = &state.views[i];
+    let geo = view.window.geometry();
+    let active = focused.as_ref() == Some(view.surface());
+    let free = view.is_free();
+    let colors = if active { &theme.active } else { &theme.inactive };
+    let frame_loc = view.loc - layout.client.loc - output_loc;
+    let client_loc = view.loc - output_loc;
+    let radius = if free { config.corner_radius } else { 0 } as f32;
+    let shaded = view.shaded;
+
+    // Fenêtres surgissantes (menus des applications), devant le cadre
+    let surface = view.surface().clone();
+    if !shaded {
         for (popup, offset) in smithay::desktop::PopupManager::popups_for_surface(&surface) {
             let loc = (client_loc + offset - popup.geometry().loc).to_physical_precise_round(scale);
             elements.extend(render_elements_from_surface_tree(
@@ -312,22 +369,33 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
                 Kind::Unspecified,
             ));
         }
+    }
 
-        // Titre et boutons
-        let key = DecoKey {
-            layout: layout.clone(),
-            title: view.title(),
-            active,
-            maximized,
-            hovered: view.hovered,
-            pressed: view.pressed,
-            scale: scale.to_bits(),
-        };
-        let view = &mut state.views[i];
-        if view.deco.as_ref().is_none_or(|d| d.key != key) {
-            view.deco = Some(build_deco(&mut state.text, &config, &theme, key));
-        }
-        let deco = view.deco.as_ref().unwrap();
+    // Titre et boutons
+    let key = DecoKey {
+        layout: layout.clone(),
+        title: view.title(),
+        active,
+        maximized: view.tiling == crate::view::Tiling::Maximized(crate::view::Axis::Both),
+        hovered: view.hovered,
+        pressed: view.pressed,
+        scale: scale.to_bits(),
+    };
+    let border_color = colors.border;
+    let title_bg = colors.title_bg;
+    let shadow_size = colors.shadow_size;
+    let shadow_color = colors.shadow_color;
+    let shadows = config.drop_shadows
+        && (free || config.drop_shadows_on_tiled)
+        && view.tiling != crate::view::Tiling::Fullscreen;
+    if layout.title_height > 0 && state.views[i].deco.as_ref().is_none_or(|d| d.key != key) {
+        let deco = build_deco(&mut state.text, &state.config, &state.theme, key);
+        state.views[i].deco = Some(deco);
+    }
+    let view = &mut state.views[i];
+    if layout.title_height > 0
+        && let Some(deco) = view.deco.as_ref()
+    {
         let mut mem = |(buf, px_size): &(MemoryRenderBuffer, Size<i32, Logical>),
                        rect: Rectangle<i32, Logical>| {
             let loc = (frame_loc + rect.loc).to_f64().to_physical(scale);
@@ -350,15 +418,16 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         if let Some(buf) = &deco.title {
             mem(buf, layout.title);
         }
+    }
 
-        // Cadre
-        let frame_area = Rectangle::new(frame_loc, layout.size);
+    // Cadre
+    if layout.size != layout.client.size {
         elements.push(Elem::Pixel(pixel(
-            &frame_prog,
-            frame_area,
+            &progs.frame,
+            Rectangle::new(frame_loc, layout.size),
             vec![
-                Uniform::new("border_color", colors.border.premultiplied()),
-                Uniform::new("title_color", colors.title_bg.premultiplied()),
+                Uniform::new("border_color", border_color.premultiplied()),
+                Uniform::new("title_color", title_bg.premultiplied()),
                 Uniform::new("radius_top", radius),
                 Uniform::new("radius_bottom", radius),
                 Uniform::new("border", layout.border as f32),
@@ -366,82 +435,80 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
                 Uniform::new("px", px(scale)),
             ],
         )));
-
-        // Contenu de la fenêtre
-        let inner_radius = (radius - layout.border as f32).max(0.0);
-        if inner_radius > 0.0 {
-            match render_offscreen(renderer, view, scale) {
-                Ok(()) => {
-                    let off = view.offscreen.as_ref().unwrap();
-                    let tex = TextureRenderElement::from_static_texture(
-                        off.id.clone(),
-                        renderer.context_id(),
-                        client_loc.to_f64().to_physical(scale),
-                        off.texture.clone(),
-                        1,
-                        Transform::Normal,
-                        None,
-                        None,
-                        Some(geo.size),
-                        None,
-                        Kind::Unspecified,
-                    );
-                    elements.push(Elem::Clipped(TextureShaderElement::new(
-                        tex,
-                        clip_prog.clone(),
-                        vec![
-                            Uniform::new("geo_size", (geo.size.w as f32, geo.size.h as f32)),
-                            Uniform::new("radius", inner_radius),
-                            Uniform::new("px", px(scale)),
-                        ],
-                    )));
-                }
-                Err(e) => {
-                    warn!("rendu hors écran: {e}");
-                    view.offscreen = None;
-                }
-            }
-        } else {
-            view.offscreen = None;
-            let loc = (client_loc - geo.loc).to_physical_precise_round(scale);
-            elements.extend(render_elements_from_surface_tree(
-                renderer,
-                &surface,
-                loc,
-                scale,
-                1.0,
-                Kind::Unspecified,
-            ));
-        }
-
-        // Ombre
-        let shadows = config.drop_shadows && (!maximized || config.drop_shadows_on_tiled);
-        if shadows && colors.shadow_size > 0 && colors.shadow_color.a > 0.0 {
-            let s = colors.shadow_size;
-            let area = Rectangle::new(
-                frame_loc - Point::from((s, s)),
-                layout.size + Size::from((2 * s, 2 * s)),
-            );
-            elements.push(Elem::Pixel(pixel(
-                &shadow_prog,
-                area,
-                vec![
-                    Uniform::new("shadow_color", colors.shadow_color.premultiplied()),
-                    Uniform::new(
-                        "shape",
-                        [s as f32, s as f32, layout.size.w as f32, layout.size.h as f32],
-                    ),
-                    Uniform::new("radius_top", radius),
-                    Uniform::new("radius_bottom", radius),
-                    Uniform::new("sigma", (s as f32 / 2.0).max(0.5)),
-                    Uniform::new("px", px(scale)),
-                ],
-            )));
-        }
     }
 
-    elements.extend(layer_elements(renderer, Layer::Bottom));
-    elements.extend(layer_elements(renderer, Layer::Background));
+    // Contenu de la fenêtre
+    let inner_radius = (radius - layout.border as f32).max(0.0);
+    if shaded {
+        view.offscreen = None;
+    } else if inner_radius > 0.0 {
+        match render_offscreen(renderer, view, scale) {
+            Ok(()) => {
+                let off = view.offscreen.as_ref().unwrap();
+                let tex = TextureRenderElement::from_static_texture(
+                    off.id.clone(),
+                    renderer.context_id(),
+                    client_loc.to_f64().to_physical(scale),
+                    off.texture.clone(),
+                    1,
+                    Transform::Normal,
+                    None,
+                    None,
+                    Some(geo.size),
+                    None,
+                    Kind::Unspecified,
+                );
+                elements.push(Elem::Clipped(TextureShaderElement::new(
+                    tex,
+                    progs.clip.clone(),
+                    vec![
+                        Uniform::new("geo_size", (geo.size.w as f32, geo.size.h as f32)),
+                        Uniform::new("radius", inner_radius),
+                        Uniform::new("px", px(scale)),
+                    ],
+                )));
+            }
+            Err(e) => {
+                warn!("rendu hors écran: {e}");
+                view.offscreen = None;
+            }
+        }
+    } else {
+        view.offscreen = None;
+        let loc = (client_loc - geo.loc).to_physical_precise_round(scale);
+        elements.extend(render_elements_from_surface_tree(
+            renderer,
+            &surface,
+            loc,
+            scale,
+            1.0,
+            Kind::Unspecified,
+        ));
+    }
+
+    // Ombre
+    if shadows && shadow_size > 0 && shadow_color.a > 0.0 {
+        let s = shadow_size;
+        let area = Rectangle::new(
+            frame_loc - Point::from((s, s)),
+            layout.size + Size::from((2 * s, 2 * s)),
+        );
+        elements.push(Elem::Pixel(pixel(
+            &progs.shadow,
+            area,
+            vec![
+                Uniform::new("shadow_color", shadow_color.premultiplied()),
+                Uniform::new(
+                    "shape",
+                    [s as f32, s as f32, layout.size.w as f32, layout.size.h as f32],
+                ),
+                Uniform::new("radius_top", radius),
+                Uniform::new("radius_bottom", radius),
+                Uniform::new("sigma", (s as f32 / 2.0).max(0.5)),
+                Uniform::new("px", px(scale)),
+            ],
+        )));
+    }
     elements
 }
 

@@ -10,7 +10,6 @@ use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, LoopSignal, Mode, PostAction};
-use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle};
@@ -38,12 +37,36 @@ use crate::view::View;
 
 /// Ce qui se trouve sous le pointeur
 pub enum Under {
-    /// Surface d'un client, et position de son origine (globale)
-    Surface(WlSurface, Point<f64, Logical>, Option<usize>),
+    /// Surface d'une vue (fenêtres surgissantes comprises), et position de
+    /// son origine (globale)
+    View(usize, WlSurface, Point<f64, Logical>),
     /// Partie du cadre d'une vue
     Frame(usize, Part),
-    /// Fond d'écran sans surface
+    /// Surface d'une couche; `background`: fond ou dessous des fenêtres
+    /// (comme le bureau pour les liaisons de la souris)
+    Layer(WlSurface, Point<f64, Logical>, bool),
+    /// Bureau sans surface
     Root,
+}
+
+/// Appui d'un bouton de la souris en cours (§ 5.4)
+#[derive(Debug, Clone)]
+pub struct Press {
+    pub button: crate::bindings::MouseButton,
+    pub mods: crate::bindings::Mods,
+    pub contexts: Vec<crate::bindings::Context>,
+    pub window: Option<Window>,
+    pub location: Point<f64, Logical>,
+    pub dragged: bool,
+    /// Un raccourci a pris l'appui: le client ne le reçoit pas
+    pub intercepted: bool,
+}
+
+/// Parcours Alt+Tab en cours (sans liste à l'écran avant la 0.4)
+#[derive(Debug, Clone)]
+pub struct Cycle {
+    pub windows: Vec<Window>,
+    pub index: usize,
 }
 
 /// Les états des protocoles doivent vivre aussi longtemps que leurs
@@ -72,7 +95,7 @@ pub struct State {
     pub popups: PopupManager,
     pub seat: Seat<State>,
 
-    /// Vues, de l'arrière vers l'avant
+    /// Vues, de l'arrière vers l'avant (à couche d'empilement égale)
     pub views: Vec<View>,
     pub outputs: Vec<Output>,
     pub config: Config,
@@ -82,10 +105,35 @@ pub struct State {
     /// Backend (sorti de l'état pendant le rendu)
     pub backend: Option<crate::backend::Backend>,
     pub pointer: Point<f64, Logical>,
-    /// Dernier clic sur une barre de titre (vue, instant), pour le double clic
-    pub last_title_click: Option<(Window, Instant)>,
+    /// Bureau affiché, et le précédent (GoToDesktop « last »)
+    pub desktop: usize,
+    pub last_desktop: usize,
+    /// ToggleShowDesktop: toutes les vues cachées
+    pub show_desktop: bool,
+    /// Vues de la plus récemment active à la plus ancienne
+    pub mru: Vec<Window>,
+    pub cycle: Option<Cycle>,
+    pub press: Option<Press>,
+    /// Dernier clic (bouton, premier contexte, vue, instant), pour le double clic
+    pub last_click: Option<(
+        crate::bindings::MouseButton,
+        crate::bindings::Context,
+        Option<Window>,
+        Instant,
+    )>,
+    /// Touches dont l'appui a déclenché un raccourci: leur relâche n'est pas
+    /// transmise
+    pub suppressed_keys: Vec<smithay::input::keyboard::Keycode>,
+    /// Disposition « us », pour retrouver la touche physique (§ 5.3)
+    pub us_keymap: Option<smithay::input::keyboard::xkb::Keymap>,
+    /// Aperçu du collage pendant un déplacement (§ 8.6)
+    pub snap_preview: Option<Rectangle<i32, Logical>>,
+    /// Défilement accumulé (pavé tactile) pour les liaisons de la molette
+    pub scroll_acc: (f64, f64),
     /// Commandes de la session: variables d'environnement à leur passer
     pub child_env: Vec<(String, String)>,
+    /// Variables du fichier `environment`
+    pub env_vars: Vec<(String, String)>,
 }
 
 #[derive(Default)]
@@ -188,8 +236,19 @@ impl State {
             shaders: None,
             backend: None,
             pointer: Point::from((0.0, 0.0)),
-            last_title_click: None,
+            desktop: 0,
+            last_desktop: 0,
+            show_desktop: false,
+            mru: vec![],
+            cycle: None,
+            press: None,
+            last_click: None,
+            suppressed_keys: vec![],
+            us_keymap: us_keymap(),
+            snap_preview: None,
+            scroll_acc: (0.0, 0.0),
             child_env,
+            env_vars: vec![],
         }
     }
 
@@ -198,6 +257,17 @@ impl State {
         let mut cmd = std::process::Command::new("sh");
         cmd.arg("-c").arg(command).stdin(std::process::Stdio::null());
         cmd.env_remove("WAYLAND_SOCKET");
+        // Les signaux bloqués pour la boucle d'événements ne le restent pas
+        // dans les programmes lancés
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(|| {
+                let mut set: libc::sigset_t = std::mem::zeroed();
+                libc::sigemptyset(&mut set);
+                libc::sigprocmask(libc::SIG_SETMASK, &set, std::ptr::null_mut());
+                Ok(())
+            });
+        }
         for (k, v) in &self.child_env {
             cmd.env(k, v);
         }
@@ -239,7 +309,15 @@ impl State {
     pub fn usable_area(&self, output: &Output) -> Rectangle<i32, Logical> {
         let mut zone = layer_map_for_output(output).non_exclusive_zone();
         zone.loc += output.current_location();
-        zone
+        let m = self.config.margin;
+        Rectangle::new(
+            (zone.loc.x + m.left, zone.loc.y + m.top).into(),
+            (
+                (zone.size.w - m.left - m.right).max(1),
+                (zone.size.h - m.top - m.bottom).max(1),
+            )
+                .into(),
+        )
     }
 
     pub fn focused_surface(&self) -> Option<WlSurface> {
@@ -261,7 +339,49 @@ impl State {
     }
 
     pub fn layout(&self, view: &View) -> Layout {
-        Layout::new(&self.config, &self.theme, view.window.geometry().size)
+        Layout::new(
+            &self.config,
+            &self.theme,
+            view.client_size(),
+            view.frame(self.config.keep_border),
+        )
+    }
+
+    /// Une vue est affichée: sur le bureau courant, ni réduite ni cachée
+    pub fn visible(&self, view: &View) -> bool {
+        view.mapped && !view.minimized && !self.show_desktop && view.on_desktop(self.desktop)
+    }
+
+    /// Indices des vues affichées, de l'arrière vers l'avant
+    pub fn stacking(&self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.views.len())
+            .filter(|&i| self.visible(&self.views[i]))
+            .collect();
+        order.sort_by_key(|&i| self.views[i].stack);
+        order
+    }
+
+    /// Vue en plein écran au premier plan: dessinée devant les panneaux
+    pub fn fullscreen_top(&self) -> Option<usize> {
+        let top = *self.stacking().last()?;
+        (self.views[top].tiling == crate::view::Tiling::Fullscreen).then_some(top)
+    }
+
+    fn view_under(&self, i: usize, p: Point<f64, Logical>) -> Option<Under> {
+        let view = &self.views[i];
+        let render_loc = view.loc - view.window.geometry().loc;
+        if !view.shaded
+            && let Some((s, loc)) = view
+                .window
+                .surface_under(p - render_loc.to_f64(), WindowSurfaceType::ALL)
+        {
+            return Some(Under::View(i, s, (loc + render_loc).to_f64()));
+        }
+        let layout = self.layout(view);
+        let frame_loc = view.loc - layout.client.loc;
+        layout
+            .part_at(p - frame_loc.to_f64())
+            .map(|part| Under::Frame(i, part))
     }
 
     /// Ce qui se trouve au point `p` (coordonnées globales)
@@ -278,44 +398,35 @@ impl State {
                         layer.surface_under(local - geo.loc.to_f64(), WindowSurfaceType::ALL)
                     {
                         let origin = (loc + geo.loc + output.current_location()).to_f64();
-                        return Some(Under::Surface(s, origin, None));
+                        let background = matches!(l, Layer::Bottom | Layer::Background);
+                        return Some(Under::Layer(s, origin, background));
                     }
                 }
             }
             None
         };
-        if let Some(u) = layer_hit(&[Layer::Overlay, Layer::Top]) {
+        if let Some(u) = layer_hit(&[Layer::Overlay]) {
             return u;
         }
-        for (i, view) in self.views.iter().enumerate().rev() {
-            if !view.mapped || view.minimized {
+        let full = self.fullscreen_top();
+        if let Some(u) = full.and_then(|i| self.view_under(i, p)) {
+            return u;
+        }
+        if let Some(u) = layer_hit(&[Layer::Top]) {
+            return u;
+        }
+        for i in self.stacking().into_iter().rev() {
+            if Some(i) == full {
                 continue;
             }
-            let render_loc = view.loc - view.window.geometry().loc;
-            if let Some((s, loc)) = view
-                .window
-                .surface_under(p - render_loc.to_f64(), WindowSurfaceType::ALL)
-            {
-                return Under::Surface(s, (loc + render_loc).to_f64(), Some(i));
-            }
-            let layout = self.layout(view);
-            let frame_loc = view.loc - layout.client.loc;
-            if let Some(part) = layout.part_at(p - frame_loc.to_f64()) {
-                return Under::Frame(i, part);
+            if let Some(u) = self.view_under(i, p) {
+                return u;
             }
         }
         if let Some(u) = layer_hit(&[Layer::Bottom, Layer::Background]) {
             return u;
         }
         Under::Root
-    }
-
-    /// Met une vue au premier plan et lui donne le clavier
-    pub fn focus_view(&mut self, i: usize) {
-        let view = self.views.remove(i);
-        let surface = view.surface().clone();
-        self.views.push(view);
-        self.set_keyboard_focus(Some(surface));
     }
 
     pub fn set_keyboard_focus(&mut self, surface: Option<WlSurface>) {
@@ -329,72 +440,19 @@ impl State {
                 view.window.toplevel().unwrap().send_pending_configure();
             }
         }
-    }
-
-    /// Donne le clavier à la vue la plus en avant
-    pub fn focus_top(&mut self) {
-        let top = self
-            .views
-            .iter()
-            .rev()
-            .find(|v| v.mapped && !v.minimized)
-            .map(|v| v.surface().clone());
-        self.set_keyboard_focus(top);
-    }
-
-    /// Place une nouvelle vue au centre de la zone utile, décalée en
-    /// cascade si une autre vue occupe déjà cette place (§ 8.2, simplifié)
-    pub fn place(&mut self, i: usize) {
-        let Some(output) = self.output_at(self.pointer) else {
-            return;
-        };
-        let zone = self.usable_area(&output);
-        let layout = self.layout(&self.views[i]);
-        let mut frame = Point::from((
-            zone.loc.x + (zone.size.w - layout.size.w).max(0) / 2,
-            zone.loc.y + (zone.size.h - layout.size.h).max(0) / 2,
-        ));
-        let step = Layout::title_height(&self.config, &self.theme);
-        while self
-            .views
-            .iter()
-            .enumerate()
-            .any(|(j, v)| j != i && v.mapped && v.loc - self.layout(v).client.loc == frame)
-        {
-            frame += Point::from((step, step));
-            if frame.x + layout.size.w > zone.loc.x + zone.size.w
-                || frame.y + layout.size.h > zone.loc.y + zone.size.h
-            {
-                frame = zone.loc;
-                break;
+        if let Some(i) = surface.as_ref().and_then(|s| self.view_index(s)) {
+            let w = self.views[i].window.clone();
+            if self.cycle.is_none() {
+                self.mru.retain(|x| *x != w);
+                self.mru.insert(0, w);
             }
         }
-        self.views[i].loc = frame + layout.client.loc;
     }
+}
 
-    pub fn toggle_maximize(&mut self, i: usize) {
-        let Some(output) = self.output_at(self.pointer) else {
-            return;
-        };
-        let toplevel = self.views[i].window.toplevel().unwrap().clone();
-        if let Some(prev) = self.views[i].maximized.take() {
-            self.views[i].loc = prev.loc;
-            toplevel.with_pending_state(|s| {
-                s.states.unset(xdg_toplevel::State::Maximized);
-                s.size = Some(prev.size);
-            });
-        } else {
-            let zone = self.usable_area(&output);
-            let geo = self.views[i].window.geometry();
-            self.views[i].maximized = Some(Rectangle::new(self.views[i].loc, geo.size));
-            let layout = self.layout(&self.views[i]);
-            let deco = layout.size - geo.size;
-            self.views[i].loc = zone.loc + layout.client.loc;
-            toplevel.with_pending_state(|s| {
-                s.states.set(xdg_toplevel::State::Maximized);
-                s.size = Some(zone.size - deco);
-            });
-        }
-        toplevel.send_pending_configure();
-    }
+/// Disposition « us » (touches physiques des raccourcis)
+fn us_keymap() -> Option<smithay::input::keyboard::xkb::Keymap> {
+    use smithay::input::keyboard::xkb;
+    let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    xkb::Keymap::new_from_names(&ctx, "", "", "us", "", None, xkb::KEYMAP_COMPILE_NO_FLAGS)
 }

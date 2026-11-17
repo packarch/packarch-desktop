@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Entrées: pointeur, clavier, gestes de déplacement et de
-//! redimensionnement (§ 8.6, § 8.7). Prototype: pas encore de raccourcis.
+//! Entrées (cahier des charges § 5.3, § 5.4, § 8.6, § 8.7): raccourcis
+//! clavier, liaisons de la souris, déplacement et redimensionnement.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent, KeyState,
@@ -19,19 +19,103 @@ use smithay::input::pointer::{
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER, Size};
-use tracing::info;
 
+use crate::actions::Action;
+use crate::bindings::{Context, Mods, MouseButton, MouseEvent, ScrollDir, find_keybind};
 use crate::config::Button;
 use crate::deco::{Edges, Part};
-use crate::state::{State, Under};
+use crate::state::{Press, State, Under};
+use crate::view::{Edge, Tiling};
+use crate::wm::{Origin, edge_rect, resist, snap_edge};
 
 pub const BTN_LEFT: u32 = 0x110;
 pub const BTN_RIGHT: u32 = 0x111;
 pub const BTN_MIDDLE: u32 = 0x112;
 
-const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// Distance à partir de laquelle un appui devient un glissement
+const DRAG_THRESHOLD: f64 = 3.0;
+
+/// Contextes de la souris d'un point, du plus précis au plus général, et la
+/// vue concernée
+fn contexts(under: &Under) -> (Vec<Context>, Option<usize>) {
+    use Context as C;
+    match under {
+        Under::View(i, ..) => (vec![C::Client, C::Frame], Some(*i)),
+        Under::Frame(i, Part::Title) => (vec![C::Title, C::TitleBar, C::Frame], Some(*i)),
+        Under::Frame(i, Part::Button(b)) => {
+            let c = match b {
+                Button::Close => C::Close,
+                Button::Maximize => C::Maximize,
+                Button::Iconify => C::Iconify,
+                Button::Shade => C::Shade,
+                Button::Desk => C::AllDesktops,
+            };
+            (vec![c, C::TitleBar, C::Frame], Some(*i))
+        }
+        Under::Frame(i, Part::Border(e)) => {
+            let specific = match (e.top, e.bottom, e.left, e.right) {
+                (true, _, true, _) => C::TLCorner,
+                (true, _, _, true) => C::TRCorner,
+                (_, true, true, _) => C::BLCorner,
+                (_, true, _, true) => C::BRCorner,
+                (true, ..) => C::Top,
+                (_, true, ..) => C::Bottom,
+                (_, _, true, _) => C::Left,
+                _ => C::Right,
+            };
+            (vec![specific, C::Border, C::Frame], Some(*i))
+        }
+        Under::Layer(_, _, true) | Under::Root => (vec![C::Root], None),
+        Under::Layer(_, _, false) => (vec![], None),
+    }
+}
 
 impl State {
+    fn mods(&self) -> Mods {
+        self.seat
+            .get_keyboard()
+            .map(|k| Mods::from_state(&k.modifier_state()))
+            .unwrap_or_default()
+    }
+
+    /// Actions des liaisons de la souris correspondant à un événement
+    fn mouse_actions(
+        &self,
+        ctxs: &[Context],
+        event: MouseEvent,
+        button: Option<MouseButton>,
+        dir: Option<ScrollDir>,
+        mods: Mods,
+    ) -> Option<Vec<Action>> {
+        let mut actions = vec![];
+        let mut found = false;
+        for ctx in ctxs {
+            for b in &self.config.mousebinds {
+                if b.context == *ctx
+                    && b.event == event
+                    && b.mods == mods
+                    && b.button == button
+                    && b.direction == dir
+                {
+                    found = true;
+                    actions.extend(b.actions.iter().cloned());
+                }
+            }
+        }
+        found.then_some(actions)
+    }
+
+    /// Une liaison avec modificateurs existe pour ce bouton (quel que soit
+    /// l'événement): l'appui ne va pas au client
+    fn has_binding(&self, ctxs: &[Context], button: MouseButton, mods: Mods) -> bool {
+        !mods.is_empty()
+            && self
+                .config
+                .mousebinds
+                .iter()
+                .any(|b| ctxs.contains(&b.context) && b.button == Some(button) && b.mods == mods)
+    }
+
     /// Événement d'un backend (winit)
     pub fn process_input<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
@@ -54,11 +138,21 @@ impl State {
             InputEvent::PointerAxis { event } => {
                 let source = event.source();
                 let mut frame = AxisFrame::new(event.time_msec()).source(source);
+                let mut steps = (0.0, 0.0);
                 for axis in [Axis::Horizontal, Axis::Vertical] {
                     let v120 = event.amount_v120(axis);
                     let amount = event
                         .amount(axis)
                         .unwrap_or_else(|| v120.unwrap_or(0.0) * 15.0 / 120.0);
+                    let step = match v120 {
+                        Some(d) => d / 120.0,
+                        None => amount / 15.0,
+                    };
+                    if axis == Axis::Horizontal {
+                        steps.0 = step;
+                    } else {
+                        steps.1 = step;
+                    }
                     if amount != 0.0 {
                         frame = frame.value(axis, amount);
                         if let Some(d) = v120 {
@@ -69,14 +163,13 @@ impl State {
                         frame = frame.stop(axis);
                     }
                 }
-                let pointer = self.seat.get_pointer().unwrap();
-                pointer.axis(self, frame);
-                pointer.frame(self);
+                self.pointer_axis(frame, steps);
             }
             _ => {}
         }
     }
 
+    /// Touche: raccourci, sinon transmise au client
     pub fn key(&mut self, code: Keycode, pressed: bool, time: u32) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
@@ -86,14 +179,44 @@ impl State {
         } else {
             KeyState::Released
         };
-        keyboard.input::<(), _>(
-            self,
-            code,
-            state,
-            SERIAL_COUNTER.next_serial(),
-            time,
-            |_, _, _| FilterResult::Forward,
-        );
+        let serial = SERIAL_COUNTER.next_serial();
+        let actions = keyboard.input(self, code, state, serial, time, |st, mods, handle| {
+            if !pressed {
+                if let Some(pos) = st.suppressed_keys.iter().position(|k| *k == code) {
+                    st.suppressed_keys.remove(pos);
+                    return FilterResult::Intercept(None);
+                }
+                return FilterResult::Forward;
+            }
+            let mut translated = handle.modified_syms();
+            translated.extend(handle.raw_syms());
+            let physical = st
+                .us_keymap
+                .as_ref()
+                .and_then(|k| k.key_get_syms_by_level(code, 0, 0).first().copied());
+            match find_keybind(&st.config.keybinds, Mods::from_state(mods), &translated, physical) {
+                Some(b) => {
+                    st.suppressed_keys.push(code);
+                    FilterResult::Intercept(Some(b.actions.clone()))
+                }
+                None => FilterResult::Forward,
+            }
+        });
+        if let Some(Some(actions)) = actions {
+            let target = self.focused_view().map(|i| self.views[i].window.clone());
+            self.run_actions(
+                &actions,
+                target,
+                Origin {
+                    button: None,
+                    location: self.pointer,
+                },
+            );
+        }
+        // Alt+Tab: fini quand plus aucun modificateur n'est enfoncé
+        if self.cycle.is_some() && self.mods().is_empty() {
+            self.end_cycle();
+        }
     }
 
     pub fn pointer_motion(&mut self, pos: Point<f64, Logical>, time: u32) {
@@ -105,16 +228,19 @@ impl State {
             _ => None,
         };
         for (i, view) in self.views.iter_mut().enumerate() {
-            let h = hovered.filter(|(j, _)| *j == i).map(|(_, b)| b);
-            if view.hovered != h {
-                view.hovered = h;
-                if h.is_none() {
-                    view.pressed = None;
-                }
-            }
+            view.hovered = hovered.filter(|(j, _)| *j == i).map(|(_, b)| b);
         }
-        let focus = match under {
-            Under::Surface(s, loc, _) => Some((s, loc)),
+        // Focus qui suit la souris
+        if self.config.follow_mouse
+            && self.press.is_none()
+            && let Under::View(i, ..) | Under::Frame(i, _) = under
+            && self.focused_view() != Some(i)
+        {
+            let raise = self.config.raise_on_focus;
+            self.focus_view(i, raise);
+        }
+        let focus = match self.under(pos) {
+            Under::View(_, s, loc) | Under::Layer(s, loc, _) => Some((s, loc)),
             _ => None,
         };
         let pointer = self.seat.get_pointer().unwrap();
@@ -128,6 +254,29 @@ impl State {
             },
         );
         pointer.frame(self);
+        // Glissement: liaisons Drag (Move, Resize…)
+        let start_drag = self.press.as_ref().is_some_and(|p| {
+            let d = pos - p.location;
+            !p.dragged && d.x.hypot(d.y) > DRAG_THRESHOLD
+        });
+        if start_drag {
+            let press = self.press.as_mut().unwrap();
+            press.dragged = true;
+            let press = press.clone();
+            if let Some(actions) = self.mouse_actions(
+                &press.contexts,
+                MouseEvent::Drag,
+                Some(press.button),
+                None,
+                press.mods,
+            ) {
+                let origin = Origin {
+                    button: Some(button_code(press.button)),
+                    location: press.location,
+                };
+                self.run_actions(&actions, press.window.clone(), origin);
+            }
+        }
     }
 
     pub fn pointer_button(&mut self, button: u32, pressed: bool, time: u32) {
@@ -138,14 +287,9 @@ impl State {
         } else {
             ButtonState::Released
         };
-        // Relâche d'un bouton du cadre: l'appui a posé une saisie implicite
-        // du pointeur, on ne passe donc pas par la recherche ci-dessous
-        if !pressed && let Some(i) = self.views.iter().position(|v| v.pressed.is_some()) {
-            let b = self.views[i].pressed.take().unwrap();
-            let over =
-                matches!(self.under(self.pointer), Under::Frame(j, Part::Button(b2)) if j == i && b2 == b);
+        let forward = |st: &mut State| {
             pointer.button(
-                self,
+                st,
                 &ButtonEvent {
                     button,
                     state,
@@ -153,130 +297,194 @@ impl State {
                     time,
                 },
             );
-            pointer.frame(self);
-            if over && button == BTN_LEFT {
-                self.button_action(i, b);
-            }
-            return;
-        }
-        if !pointer.is_grabbed() {
-            match self.under(self.pointer) {
-                Under::Surface(surface, _, view) => {
-                    if pressed {
-                        match view {
-                            Some(i) => self.focus_view(i),
-                            None => self.focus_layer_on_click(&surface),
-                        }
-                    }
-                }
-                Under::Frame(i, part) => {
-                    pointer.button(
-                        self,
-                        &ButtonEvent {
-                            button,
-                            state,
-                            serial,
-                            time,
-                        },
-                    );
-                    pointer.frame(self);
-                    self.frame_button(i, part, button, pressed, serial);
-                    return;
-                }
-                Under::Root => {}
-            }
-        }
-        pointer.button(
-            self,
-            &ButtonEvent {
-                button,
-                state,
-                serial,
-                time,
-            },
-        );
-        pointer.frame(self);
-    }
-
-    /// Couche « à la demande » (barre, notifications): le clavier au clic
-    fn focus_layer_on_click(&mut self, surface: &WlSurface) {
-        use smithay::wayland::shell::wlr_layer::KeyboardInteractivity;
-        for output in self.outputs.clone() {
-            let map = smithay::desktop::layer_map_for_output(&output);
-            let layer = map
-                .layer_for_surface(surface, smithay::desktop::WindowSurfaceType::ALL)
-                .cloned();
-            drop(map);
-            if let Some(layer) = layer
-                && layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None
-            {
-                self.set_keyboard_focus(Some(layer.wl_surface().clone()));
-            }
-        }
-    }
-
-    /// Clic sur le cadre d'une vue
-    fn frame_button(
-        &mut self,
-        i: usize,
-        part: Part,
-        button: u32,
-        pressed: bool,
-        serial: smithay::utils::Serial,
-    ) {
-        let window = self.views[i].window.clone();
-        if pressed {
-            self.focus_view(i);
-        }
-        let Some(i) = self.views.iter().position(|v| v.window == window) else {
+            pointer.frame(st);
+        };
+        let Some(mbutton) = MouseButton::from_code(button) else {
+            forward(self);
             return;
         };
-        let start = || GrabStartData {
-            focus: None,
-            button,
+        if pressed {
+            // Menu ouvert ou geste en cours: l'appui leur revient
+            if pointer.is_grabbed() || self.press.is_some() {
+                forward(self);
+                return;
+            }
+            let mods = self.mods();
+            let under = self.under(self.pointer);
+            let (ctxs, view) = contexts(&under);
+            if let Under::Frame(i, Part::Button(b)) = under
+                && mbutton == MouseButton::Left
+            {
+                self.views[i].pressed = Some(b);
+            }
+            let window = view.map(|i| self.views[i].window.clone());
+            let intercepted = self.has_binding(&ctxs, mbutton, mods);
+            self.press = Some(Press {
+                button: mbutton,
+                mods,
+                contexts: ctxs.clone(),
+                window: window.clone(),
+                location: self.pointer,
+                dragged: false,
+                intercepted,
+            });
+            if let Some(actions) = self.mouse_actions(&ctxs, MouseEvent::Press, Some(mbutton), None, mods) {
+                self.run_actions(
+                    &actions,
+                    window,
+                    Origin {
+                        button: Some(button),
+                        location: self.pointer,
+                    },
+                );
+            }
+            if !intercepted {
+                // Le focus a pu changer: le client sous le pointeur reçoit l'appui
+                let focus = match self.under(self.pointer) {
+                    Under::View(_, s, loc) | Under::Layer(s, loc, _) => Some((s, loc)),
+                    _ => None,
+                };
+                pointer.motion(
+                    self,
+                    focus,
+                    &MotionEvent {
+                        location: self.pointer,
+                        serial,
+                        time,
+                    },
+                );
+                forward(self);
+            }
+            return;
+        }
+        // Relâche
+        let press = self.press.take_if(|p| p.button == mbutton);
+        for v in &mut self.views {
+            v.pressed = None;
+        }
+        let Some(press) = press else {
+            forward(self);
+            return;
+        };
+        // Un geste (déplacement…) reçoit toujours la relâche
+        if !press.intercepted || pointer.is_grabbed() {
+            forward(self);
+        }
+        let origin = Origin {
+            button: Some(button),
             location: self.pointer,
         };
-        match (part, button, pressed) {
-            (Part::Button(b), BTN_LEFT, true) => self.views[i].pressed = Some(b),
-            (Part::Title, BTN_LEFT, true) => {
-                let now = Instant::now();
-                let double = self
-                    .last_title_click
-                    .as_ref()
-                    .is_some_and(|(w, t)| *w == window && now.duration_since(*t) < DOUBLE_CLICK);
-                if double {
-                    self.last_title_click = None;
-                    self.toggle_maximize(i);
-                } else {
-                    self.last_title_click = Some((window, now));
-                    let s = start();
-                    self.start_move(i, s, serial);
-                }
+        if let Some(actions) = self.mouse_actions(
+            &press.contexts,
+            MouseEvent::Release,
+            Some(mbutton),
+            None,
+            press.mods,
+        ) {
+            self.run_actions(&actions, press.window.clone(), origin);
+        }
+        if press.dragged {
+            return;
+        }
+        // Clic: relâché dans la même zone que l'appui
+        let (now_ctxs, now_view) = contexts(&self.under(self.pointer));
+        let same_view = now_view.map(|i| self.views[i].window.clone()) == press.window;
+        if now_ctxs.first() != press.contexts.first() || !same_view {
+            return;
+        }
+        if let Some(actions) = self.mouse_actions(
+            &press.contexts,
+            MouseEvent::Click,
+            Some(mbutton),
+            None,
+            press.mods,
+        ) {
+            self.run_actions(&actions, press.window.clone(), origin);
+        }
+        let first = press.contexts.first().copied().unwrap_or(Context::Root);
+        let now = Instant::now();
+        let double = self.last_click.as_ref().is_some_and(|(b, c, w, t)| {
+            *b == mbutton
+                && *c == first
+                && *w == press.window
+                && now.duration_since(*t).as_millis() <= self.config.double_click_ms as u128
+        });
+        if double {
+            self.last_click = None;
+            if let Some(actions) = self.mouse_actions(
+                &press.contexts,
+                MouseEvent::DoubleClick,
+                Some(mbutton),
+                None,
+                press.mods,
+            ) {
+                self.run_actions(&actions, press.window.clone(), origin);
             }
-            (Part::Border(edges), BTN_LEFT, true) => {
-                let s = start();
-                self.start_resize(i, edges, s, serial);
-            }
-            (Part::Title, BTN_MIDDLE, true) => {
-                // Clic du milieu sur le titre: à l'arrière-plan, comme Openbox
-                let view = self.views.remove(i);
-                self.views.insert(0, view);
-                self.focus_top();
-            }
-            _ => {}
+        } else {
+            self.last_click = Some((mbutton, first, press.window.clone(), now));
         }
     }
 
-    fn button_action(&mut self, i: usize, button: Button) {
-        match button {
-            Button::Close => {
-                tracing::debug!("fermeture: « {} »", self.views[i].title());
-                self.views[i].window.toplevel().unwrap().send_close()
+    /// Molette: liaisons Scroll, sinon transmise au client. `steps`: crans
+    /// horizontaux et verticaux (positifs vers la droite et le bas)
+    pub fn pointer_axis(&mut self, frame: AxisFrame, steps: (f64, f64)) {
+        let pointer = self.seat.get_pointer().unwrap();
+        if !pointer.is_grabbed() {
+            let (ctxs, view) = contexts(&self.under(self.pointer));
+            let mods = self.mods();
+            let any = [ScrollDir::Up, ScrollDir::Down, ScrollDir::Left, ScrollDir::Right]
+                .iter()
+                .any(|d| {
+                    self.mouse_actions(&ctxs, MouseEvent::Scroll, None, Some(*d), mods)
+                        .is_some()
+                });
+            if any {
+                self.scroll_acc.0 += steps.0;
+                self.scroll_acc.1 += steps.1;
+                let mut dirs = vec![];
+                while self.scroll_acc.1 >= 1.0 {
+                    self.scroll_acc.1 -= 1.0;
+                    dirs.push(ScrollDir::Down);
+                }
+                while self.scroll_acc.1 <= -1.0 {
+                    self.scroll_acc.1 += 1.0;
+                    dirs.push(ScrollDir::Up);
+                }
+                while self.scroll_acc.0 >= 1.0 {
+                    self.scroll_acc.0 -= 1.0;
+                    dirs.push(ScrollDir::Right);
+                }
+                while self.scroll_acc.0 <= -1.0 {
+                    self.scroll_acc.0 += 1.0;
+                    dirs.push(ScrollDir::Left);
+                }
+                let window = view.map(|i| self.views[i].window.clone());
+                for d in dirs {
+                    if let Some(actions) = self.mouse_actions(&ctxs, MouseEvent::Scroll, None, Some(d), mods)
+                    {
+                        let origin = Origin {
+                            button: None,
+                            location: self.pointer,
+                        };
+                        self.run_actions(&actions, window.clone(), origin);
+                    }
+                }
+                return;
             }
-            Button::Maximize => self.toggle_maximize(i),
-            Button::Iconify => info!("réduction: prévue avec la barre des tâches (0.4)"),
-            Button::Shade | Button::Desk => info!("{button:?}: prévu en 0.2"),
+            self.scroll_acc = (0.0, 0.0);
         }
+        pointer.axis(self, frame);
+        pointer.frame(self);
+    }
+}
+
+fn button_code(b: MouseButton) -> u32 {
+    match b {
+        MouseButton::Left => BTN_LEFT,
+        MouseButton::Right => BTN_RIGHT,
+        MouseButton::Middle => BTN_MIDDLE,
+        MouseButton::Side => 0x113,
+        MouseButton::Extra => 0x114,
     }
 }
 
@@ -285,6 +493,10 @@ pub struct MoveGrab {
     pub start: GrabStartData<State>,
     pub window: Window,
     pub initial_loc: Point<i32, Logical>,
+    /// Lancé au clavier: fini au prochain clic
+    pub keyboard: bool,
+    /// Bord visé par le pointeur (collage au relâchement)
+    pub snap: Option<Edge>,
 }
 
 /// Redimensionnement d'une vue à la souris
@@ -293,6 +505,7 @@ pub struct ResizeGrab {
     pub window: Window,
     pub edges: Edges,
     pub initial_size: Size<i32, Logical>,
+    pub keyboard: bool,
 }
 
 /// Méthodes communes aux deux gestes: tout est transmis tel quel, sauf le
@@ -384,6 +597,21 @@ macro_rules! forward_grab {
     };
 }
 
+/// Fin d'un geste: au relâchement du bouton, ou au clic s'il a été lancé au
+/// clavier
+fn grab_ends(
+    keyboard: bool,
+    start_button: u32,
+    handle: &PointerInnerHandle<'_, State>,
+    event: &ButtonEvent,
+) -> bool {
+    if keyboard {
+        event.state == ButtonState::Pressed
+    } else {
+        !handle.current_pressed().contains(&start_button)
+    }
+}
+
 impl PointerGrab<State> for MoveGrab {
     fn motion(
         &mut self,
@@ -394,25 +622,85 @@ impl PointerGrab<State> for MoveGrab {
     ) {
         handle.motion(data, None, event);
         data.pointer = event.location;
-        let delta = event.location - self.start.location;
-        if let Some(view) = data.views.iter_mut().find(|v| v.window == self.window) {
-            if view.maximized.is_some() {
+        let Some(i) = data.window_index(&self.window) else {
+            return;
+        };
+        // Une vue imposée (maximisée, collée) reprend sa taille libre sous
+        // le pointeur
+        if data.views[i].tiling != Tiling::None {
+            if data.views[i].tiling == Tiling::Fullscreen {
                 return;
             }
-            view.loc = (self.initial_loc.to_f64() + delta).to_i32_round();
+            let before = data.frame_rect(i);
+            let saved = data.views[i].saved;
+            data.restore(i);
+            if let Some(saved) = saved {
+                let layout = data.layout(&data.views[i]);
+                let frame_w = saved.size.w + layout.size.w - layout.client.size.w;
+                let ratio = (self.start.location.x - before.loc.x as f64) / before.size.w.max(1) as f64;
+                let x = event.location.x - ratio * frame_w as f64;
+                let y = event.location.y - (self.start.location.y - before.loc.y as f64);
+                data.views[i].loc = Point::<f64, Logical>::from((x, y)).to_i32_round() + layout.client.loc;
+            }
+            self.initial_loc = data.views[i].loc;
+            self.start.location = event.location;
+            return;
         }
+        let delta = event.location - self.start.location;
+        let layout = data.layout(&data.views[i]);
+        let mut frame = data.frame_rect(i);
+        frame.loc = (self.initial_loc.to_f64() + delta).to_i32_round() - layout.client.loc;
+        let zone = data.view_zone(i);
+        let others: Vec<_> = data
+            .stacking()
+            .into_iter()
+            .filter(|&j| j != i)
+            .map(|j| data.frame_rect(j))
+            .collect();
+        let c = &data.config;
+        let loc = resist(
+            frame,
+            zone,
+            c.screen_edge_strength,
+            &others,
+            c.window_edge_strength,
+        );
+        data.views[i].loc = loc + layout.client.loc;
+        // Collage: aperçu quand le pointeur approche d'un bord
+        let zone_here = data
+            .output_at(event.location)
+            .map(|o| data.usable_area(&o))
+            .unwrap_or(zone);
+        self.snap = snap_edge(
+            zone_here,
+            event.location,
+            data.config.snap_inner,
+            data.config.top_maximize,
+        );
+        data.snap_preview = self.snap.map(|e| edge_rect(zone_here, e, data.config.gap));
     }
 
     fn button(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, event: &ButtonEvent) {
-        handle.button(data, event);
-        if !handle.current_pressed().contains(&self.start.button) {
+        // Lancé au clavier: le clic qui pose la vue n'est pas transmis
+        if !self.keyboard {
+            handle.button(data, event);
+        }
+        if grab_ends(self.keyboard, self.start.button, handle, event) {
             handle.unset_grab(self, data, event.serial, event.time, true);
+            data.snap_preview = None;
+            if let Some(edge) = self.snap.take()
+                && let Some(i) = data.window_index(&self.window)
+            {
+                data.snap_to_edge(i, edge);
+            }
         }
     }
 
     forward_grab!();
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, data: &mut State) {
+        data.snap_preview = None;
+    }
 }
 
 impl PointerGrab<State> for ResizeGrab {
@@ -456,14 +744,16 @@ impl PointerGrab<State> for ResizeGrab {
     }
 
     fn button(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, event: &ButtonEvent) {
-        handle.button(data, event);
-        if !handle.current_pressed().contains(&self.start.button) {
+        if !self.keyboard {
+            handle.button(data, event);
+        }
+        if grab_ends(self.keyboard, self.start.button, handle, event) {
             handle.unset_grab(self, data, event.serial, event.time, true);
             let toplevel = self.window.toplevel().unwrap();
             toplevel.with_pending_state(|s| s.states.unset(xdg_toplevel::State::Resizing));
             toplevel.send_pending_configure();
-            if let Some(view) = data.views.iter_mut().find(|v| v.window == self.window)
-                && let Some(r) = view.resize.as_mut()
+            if let Some(i) = data.window_index(&self.window)
+                && let Some(r) = data.views[i].resize.as_mut()
             {
                 r.ending = true;
             }

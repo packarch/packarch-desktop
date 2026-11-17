@@ -233,6 +233,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43b32313e937c8721c9d17ee9bf60699a6402b4b7c2cb6ac1bee0ffcaa4b4e5e"
 dependencies = [
  "bitflags 2.13.2",
+ "nix",
  "polling",
  "rustix 1.1.6",
  "tracing",
@@ -972,6 +973,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bc81ce8148d3b4f3274da811f11cdd824ae661ee4ef732cdb229825cf5be7f7"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1238,11 +1251,13 @@ dependencies = [
 
 [[package]]
 name = "packarch-rwdesktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
+ "calloop 0.14.5",
  "clap",
  "cosmic-text",
+ "libc",
  "png",
  "roxmltree 0.21.2",
  "smithay",

@@ -1,7 +1,5 @@
 # Prototype 0.1: fond, barre, fenêtre décorée, gestes à la souris.
 # Lancé par tests/capture.sh; les captures sont écrites dans le dossier courant.
-spawn swaybg -c '#c8ccd0'
-spawn waybar -c waybar/config -s waybar/style.css > waybar.log 2>&1
 wait 800
 spawn kitty --config NONE -o confirm_os_window_close=0 -e sh -c 'echo Bonjour Packarch; sleep 60'
 wait-views 1 8000

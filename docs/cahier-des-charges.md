@@ -223,9 +223,11 @@ marqués **P**, ils sont prioritaires) :
 - Touche : nom de keysym xkb (`Return`, `KP_5`, `XF86AudioMute`, `space`,
   `Print`, `Tab`…), ou chiffre/lettre.
 - **Clavier AZERTY** : un raccourci écrit avec un chiffre (`W-1`) doit marcher
-  sans Maj sur un clavier français. Règle : comparer d'abord la touche
-  physique (le keysym du niveau 1 de la disposition `us` pour ce
-  code de touche), puis le keysym produit par la disposition active.
+  sans Maj sur un clavier français, et un raccourci écrit avec une lettre
+  (`W-q`) doit rester sur cette lettre. Règle : comparer d'abord le keysym
+  produit par la disposition active (avec et sans les modificateurs, en
+  minuscule), puis, si aucun raccourci ne correspond, la touche physique (le
+  keysym du niveau 1 de la disposition `us` pour ce code de touche).
 - `allowWhenLocked="yes"` : actif aussi pendant le verrouillage (volume,
   luminosité).
 - Les raccourcis sont prioritaires sur le client, sauf pendant le

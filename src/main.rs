@@ -7,16 +7,21 @@
     clippy::large_enum_variant
 )]
 
+mod actions;
 mod backend;
+mod bindings;
 mod config;
 mod deco;
+mod env;
 mod handlers;
 mod input;
 mod render;
 mod script;
+mod session;
 mod state;
 mod theme;
 mod view;
+mod wm;
 
 use std::path::PathBuf;
 
@@ -44,6 +49,12 @@ struct Cli {
     /// Commande lancée au démarrage
     #[arg(short, long, value_name = "COMMANDE")]
     startup: Vec<String>,
+    /// Demande à l'instance en cours de recharger sa configuration
+    #[arg(short, long)]
+    reconfigure: bool,
+    /// Demande à l'instance en cours de quitter
+    #[arg(short, long)]
+    exit: bool,
     /// Journal détaillé
     #[arg(short, long)]
     debug: bool,
@@ -62,7 +73,7 @@ struct Cli {
 }
 
 fn version() -> &'static str {
-    concat!(env!("CARGO_PKG_VERSION"), " (prototype)")
+    env!("CARGO_PKG_VERSION")
 }
 
 fn main() {
@@ -80,6 +91,14 @@ fn main() {
         })
     });
     tracing_subscriber::fmt().with_env_filter(filter).init();
+    if cli.reconfigure || cli.exit {
+        let sig = if cli.exit { libc::SIGTERM } else { libc::SIGHUP };
+        if let Err(e) = session::signal_instance(sig) {
+            eprintln!("packarch: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Err(e) = run(cli) {
         error!("{e:#}");
         std::process::exit(1);
@@ -90,7 +109,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     info!("packarch {}", version());
     let dir = config::config_dir(cli.config_dir.as_deref());
     info!("configuration: {}", dir.display());
-    let config = Config::load(&dir);
+    let config = Config::load(&dir).unwrap_or_else(|e| {
+        tracing::warn!("{e}; configuration par défaut");
+        Config::fallback(&dir)
+    });
 
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
@@ -108,6 +130,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
     }
 
+    state.apply_session_env();
+    state.apply_keyboard();
+    session::watch_signals(&event_loop.handle());
+    state.start_session();
     for cmd in &cli.startup {
         state.spawn(cmd);
     }
@@ -117,6 +143,11 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         script::run(&event_loop.handle(), steps);
     }
 
-    event_loop.run(None, &mut state, |_| {})?;
+    let result = event_loop.run(None, &mut state, |_| {});
+    state.end_session();
+    result?;
+    if script::FAILED.load(std::sync::atomic::Ordering::Relaxed) {
+        anyhow::bail!("scénario d'essai: au moins une vérification a échoué");
+    }
     Ok(())
 }

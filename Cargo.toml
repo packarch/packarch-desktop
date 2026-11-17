@@ -1,6 +1,6 @@
 [package]
 name = "packarch-rwdesktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Compositeur Wayland à fenêtres flottantes de Packarch"
@@ -26,6 +26,8 @@ roxmltree = "0.21"
 cosmic-text = "0.14"
 png = "0.17"
 anyhow = "1"
+libc = "0.2"
+calloop = { version = "0.14", features = ["signals"] }
 
 [profile.release]
 debug = "line-tables-only"
