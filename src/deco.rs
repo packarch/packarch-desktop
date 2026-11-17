@@ -199,6 +199,8 @@ impl Image {
 pub struct Text {
     fonts: FontSystem,
     cache: SwashCache,
+    /// Aucune police installée (vérifié une fois)
+    no_fonts: Option<bool>,
 }
 
 impl Text {
@@ -206,7 +208,21 @@ impl Text {
         Text {
             fonts: FontSystem::new(),
             cache: SwashCache::new(),
+            no_fonts: None,
         }
+    }
+
+    /// Une police au moins est installée (sans elle, cosmic-text panique au
+    /// placement du texte: le texte n'est alors pas écrit)
+    fn has_fonts(&mut self) -> bool {
+        if self.no_fonts.is_none() {
+            let none = self.fonts.db().faces().next().is_none();
+            if none {
+                tracing::warn!("aucune police trouvée: titres et menus sans texte");
+            }
+            self.no_fonts = Some(none);
+        }
+        self.no_fonts == Some(false)
     }
 
     fn buffer(&mut self, text: &str, font: &Font, scale: f64) -> Buffer {
@@ -234,7 +250,7 @@ impl Text {
 
     /// Largeur d'un texte, en pixels à l'échelle `scale`
     pub fn measure(&mut self, text: &str, font: &Font, scale: f64) -> f32 {
-        if text.is_empty() {
+        if text.is_empty() || !self.has_fonts() {
             return 0.0;
         }
         Text::width(&self.buffer(text, font, scale))
@@ -253,7 +269,7 @@ impl Text {
         scale: f64,
     ) -> Image {
         let mut img = Image::new(width, height);
-        if width == 0 || height == 0 || title.is_empty() {
+        if width == 0 || height == 0 || title.is_empty() || !self.has_fonts() {
             return img;
         }
         let mut text = title.to_string();
@@ -277,7 +293,7 @@ impl Text {
         let line = buffer.layout_runs().next().map(|r| r.line_height).unwrap_or(0.0);
         let y0 = ((height as f32 - line) / 2.0).round() as i32;
         let base = cosmic_text::Color::rgba(255, 255, 255, 255);
-        let Text { fonts, cache } = self;
+        let Text { fonts, cache, .. } = self;
         buffer.draw(fonts, cache, base, |x, y, w, h, c| {
             let cov = c.a() as f32 / 255.0;
             for dy in 0..h as i32 {
