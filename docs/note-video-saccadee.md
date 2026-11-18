@@ -71,6 +71,9 @@ libérations de tampons et les rappels envoyés hors rendu attendaient aussi.
 Résultat attendu : environ 24 images par seconde, avec des écarts
 alternés de 33 et 50 ms.
 
+Confirmé à l'usage le 19 novembre 2026 avec la 1.3.3 : la lecture est
+fluide dans tous les lecteurs.
+
 ## Remarques
 
 - Le numéro de séquence des retours de présentation vaut 0 avec le pilote
