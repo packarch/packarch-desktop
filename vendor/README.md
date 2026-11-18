@@ -13,5 +13,10 @@ Copie de [Smithay](https://github.com/Smithay/smithay) 0.7.0 (licence MIT,
   `PlaneConfig`, envoyé dans `HOTSPOT_X` / `HOTSPOT_Y`.
 - `src/backend/drm/compositor/mod.rs` : `DrmCompositor::set_cursor_hotspot`,
   point chaud de l'élément curseur, donné au plan curseur.
+- `src/backend/renderer/gles/element.rs` : `TextureShaderElement::with_id`
+  et `PixelShaderElement::with_id`. `new` donne un nouvel identifiant à
+  chaque appel : le suivi des dégâts prenait le contenu des fenêtres
+  arrondies, leur cadre et leur ombre pour de nouveaux éléments à chaque
+  image et les redessinait en entier.
 
 À retirer quand Smithay gérera le point chaud du plan curseur.

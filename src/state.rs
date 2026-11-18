@@ -164,9 +164,10 @@ pub struct State {
     pub lock: crate::protocols::Lock,
     pub lock_surfaces: Vec<(Output, smithay::wayland::session_lock::LockSurface)>,
     /// Fenêtres dessinées par leur texture hors écran au dernier rendu
-    /// (surface, cadre du contenu) : leurs surfaces n'apparaissent pas dans
-    /// les états du rendu, `after_render` les y ajoute
-    pub offscreen_shown: Vec<(WlSurface, Rectangle<i32, Logical>)>,
+    /// (surface, identifiant de l'élément du contenu) : leurs surfaces
+    /// n'apparaissent pas dans les états du rendu, `after_render` les y
+    /// ajoute
+    pub offscreen_shown: Vec<(WlSurface, smithay::backend::renderer::element::Id)>,
     /// Surfaces qui empêchent la mise en veille (vidéos)
     pub idle_inhibitors: Vec<WlSurface>,
     /// Curseur demandé par le client sous le pointeur

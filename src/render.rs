@@ -23,11 +23,12 @@ use smithay::backend::renderer::gles::{
     GlesPixelProgram, GlesRenderer, GlesTarget, GlesTexProgram, GlesTexture, Uniform, UniformName,
     UniformType,
 };
+use smithay::backend::renderer::utils::{DamageBag, DamageSnapshot};
 use smithay::backend::renderer::{Bind, Offscreen as _, Renderer, TextureFilter};
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::render_elements;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::warn;
 
@@ -220,7 +221,14 @@ pub struct WindowTexture {
     damage: OutputDamageTracker,
     size: Size<i32, Physical>,
     scale: f64,
+    /// Identifiant de l'élément du contenu, stable tant que la texture et
+    /// l'arrondi ne changent pas : le suivi des dégâts de l'écran ne
+    /// redessine que `damage`
     id: Id,
+    /// Dégâts de la texture, rendu après rendu
+    damage_bag: DamageBag<i32, Buffer>,
+    /// Arrondi des coins du dernier élément
+    radius: f32,
     rendered: bool,
 }
 
@@ -265,8 +273,17 @@ fn pixel(
     area: Rectangle<i32, Logical>,
     alpha: f32,
     uniforms: Vec<Uniform<'_>>,
+    id: Id,
 ) -> PixelShaderElement {
-    PixelShaderElement::new(program.clone(), area, None, alpha, uniforms, Kind::Unspecified)
+    PixelShaderElement::with_id(
+        program.clone(),
+        area,
+        None,
+        alpha,
+        uniforms,
+        Kind::Unspecified,
+        id,
+    )
 }
 
 /// Programmes des shaders, copiés pour la durée d'un rendu
@@ -278,7 +295,7 @@ struct Progs {
 }
 
 /// Paramètres du shader du cadre
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct FrameParams {
     border_color: Color,
     title_color: Color,
@@ -292,12 +309,13 @@ struct FrameParams {
 struct Content {
     texture: GlesTexture,
     id: Id,
+    damage: DamageSnapshot<i32, Buffer>,
     /// Géométrie du client, coordonnées globales
     rect: Rectangle<i32, Logical>,
     radius: f32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct ShadowParams {
     color: Color,
     size: i32,
@@ -316,6 +334,11 @@ pub struct Snapshot {
     frame_params: Option<FrameParams>,
     content: Option<Content>,
     shadow: Option<ShadowParams>,
+    /// Identifiants des éléments du cadre et de l'ombre, repris d'une image
+    /// à l'autre tant que leurs paramètres ne changent pas: le suivi des
+    /// dégâts ne les redessine alors pas
+    frame_id: Id,
+    shadow_id: Id,
 }
 
 /// Vue fermée ou réduite, animée jusqu'à disparaître (§ 10.5)
@@ -541,6 +564,7 @@ fn magnifier_elements(
                 Uniform::new("title_height", 0.0f32),
                 Uniform::new("px", px(scale)),
             ],
+            Id::new(),
         )));
     }
     if let Some(visible) = src.intersection(screen) {
@@ -577,6 +601,7 @@ fn magnifier_elements(
             Uniform::new("title_height", 0.0f32),
             Uniform::new("px", px(scale)),
         ],
+        Id::new(),
     )));
     Ok(Some(out))
 }
@@ -690,6 +715,7 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
                 Uniform::new("title_height", (rect.size.h - 4).max(0) as f32),
                 Uniform::new("px", px(scale)),
             ],
+            Id::new(),
         )));
     }
 
@@ -726,6 +752,7 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
                 Uniform::new("title_height", 0.0f32),
                 Uniform::new("px", px(scale)),
             ],
+            Id::new(),
         )));
     }
 
@@ -757,6 +784,7 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
                 Uniform::new("title_height", 0.0f32),
                 Uniform::new("px", px(scale)),
             ],
+            Id::new(),
         )));
     }
 
@@ -963,6 +991,7 @@ fn menu_elements(
                 t.shadow_color,
                 alpha,
                 scale,
+                Id::new(),
             )));
         }
     };
@@ -1034,6 +1063,7 @@ fn floating(
             t.shadow_color,
             alpha,
             scale,
+            Id::new(),
         )));
     }
     out
@@ -1117,6 +1147,7 @@ fn shadow(
     color: Color,
     alpha: f32,
     scale: f64,
+    id: Id,
 ) -> PixelShaderElement {
     pixel(
         &progs.shadow,
@@ -1130,6 +1161,7 @@ fn shadow(
             Uniform::new("sigma", (s as f32 / 2.0).max(0.5)),
             Uniform::new("px", px(scale)),
         ],
+        id,
     )
 }
 
@@ -1175,11 +1207,12 @@ fn snapshot_elements(
                 Uniform::new("title_height", f.title_height),
                 Uniform::new("px", px(scale)),
             ],
+            snap.frame_id.clone(),
         )));
     }
     if let Some(c) = &snap.content {
         let size = c.rect.size;
-        let tex = TextureRenderElement::from_static_texture(
+        let tex = TextureRenderElement::from_texture_with_damage(
             c.id.clone(),
             renderer.context_id(),
             (c.rect.loc - output_loc).to_f64().to_physical(scale),
@@ -1190,9 +1223,10 @@ fn snapshot_elements(
             None,
             Some(size),
             None,
+            c.damage.clone(),
             Kind::Unspecified,
         );
-        elements.push(Base::Clipped(TextureShaderElement::new(
+        elements.push(Base::Clipped(TextureShaderElement::with_id(
             tex,
             progs.clip.clone(),
             vec![
@@ -1200,6 +1234,7 @@ fn snapshot_elements(
                 Uniform::new("radius", c.radius),
                 Uniform::new("px", px(scale)),
             ],
+            c.id.clone(),
         )));
     }
     if let Some(live) = live {
@@ -1219,6 +1254,7 @@ fn snapshot_elements(
             s.color,
             alpha,
             scale,
+            snap.shadow_id.clone(),
         )));
     }
     elements
@@ -1327,11 +1363,18 @@ fn view_elements(
     if use_offscreen {
         match render_offscreen(renderer, view, scale) {
             Ok(()) => {
-                let off = view.offscreen.as_ref().unwrap();
+                let off = view.offscreen.as_mut().unwrap();
+                // Les uniformes ne comptent pas dans les dégâts: un autre
+                // arrondi demande un nouvel élément
+                if off.radius != inner_radius {
+                    off.radius = inner_radius;
+                    off.id = Id::new();
+                }
                 let rect = Rectangle::new(view.loc, geo.size);
                 content = Some(Content {
                     texture: off.texture.clone(),
                     id: off.id.clone(),
+                    damage: off.damage_bag.snapshot(),
                     rect,
                     radius: inner_radius,
                 });
@@ -1357,20 +1400,32 @@ fn view_elements(
             Kind::Unspecified,
         ));
     }
+    // Les uniformes ne comptent pas dans les dégâts: d'autres paramètres
+    // demandent un nouvel élément
+    let prev = view.last.as_ref();
+    let frame_id = match prev {
+        Some(p) if p.frame_params == frame_params => p.frame_id.clone(),
+        _ => Id::new(),
+    };
+    let shadow_id = match prev {
+        Some(p) if p.shadow == shadow => p.shadow_id.clone(),
+        _ => Id::new(),
+    };
     let snap = Snapshot {
         frame: frame_global,
         deco,
         frame_params,
         content,
         shadow,
+        frame_id,
+        shadow_id,
     };
     elements.extend(snapshot_elements(
         &snap, renderer, progs, scale, output_loc, alpha, live,
     ));
     view.last = Some(snap);
     if let Some(c) = &view.last.as_ref().unwrap().content {
-        let rect = c.rect;
-        state.offscreen_shown.push((surface, rect));
+        state.offscreen_shown.push((surface, c.id.clone()));
     }
     elements
 }
@@ -1541,6 +1596,8 @@ fn render_offscreen(
             size,
             scale,
             id: Id::new(),
+            damage_bag: DamageBag::default(),
+            radius: -1.0,
             rendered: false,
         });
     }
@@ -1555,10 +1612,16 @@ fn render_offscreen(
     let result = off
         .damage
         .render_output(renderer, &mut target, age, &elements, [0.0, 0.0, 0.0, 0.0])?;
-    let changed = result.damage.is_some_and(|d| !d.is_empty());
     off.rendered = true;
-    if changed {
-        off.id = Id::new();
+    // Texture à l'échelle 1, sans transformation: pixels et coordonnées du
+    // tampon coïncident
+    if let Some(damage) = result.damage.filter(|d| !d.is_empty()) {
+        let size = off.size.to_logical(1);
+        off.damage_bag.add(
+            damage
+                .iter()
+                .map(|r| r.to_logical(1).to_buffer(1, Transform::Normal, &size)),
+        );
     }
     Ok(())
 }

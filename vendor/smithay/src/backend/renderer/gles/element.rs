@@ -46,6 +46,23 @@ impl PixelShaderElement {
         }
     }
 
+    /// packarch: same as [`PixelShaderElement::new`] with a given [`Id`],
+    /// so that damage tracking can follow the element across frames
+    pub fn with_id(
+        shader: GlesPixelProgram,
+        area: Rectangle<i32, Logical>,
+        opaque_regions: Option<Vec<Rectangle<i32, Logical>>>,
+        alpha: f32,
+        additional_uniforms: Vec<Uniform<'_>>,
+        kind: Kind,
+        id: Id,
+    ) -> Self {
+        PixelShaderElement {
+            id,
+            ..Self::new(shader, area, opaque_regions, alpha, additional_uniforms, kind)
+        }
+    }
+
     /// Resize the canvas area
     pub fn resize(
         &mut self,
@@ -153,6 +170,22 @@ impl TextureShaderElement {
             program,
             id: Id::new(),
 
+            additional_uniforms: additional_uniforms.into_iter().map(|u| u.into_owned()).collect(),
+        }
+    }
+
+    /// packarch: same as [`TextureShaderElement::new`] with a given [`Id`],
+    /// so that damage tracking can follow the element across frames
+    pub fn with_id(
+        inner: TextureRenderElement<GlesTexture>,
+        program: GlesTexProgram,
+        additional_uniforms: Vec<Uniform<'_>>,
+        id: Id,
+    ) -> Self {
+        Self {
+            inner,
+            program,
+            id,
             additional_uniforms: additional_uniforms.into_iter().map(|u| u.into_owned()).collect(),
         }
     }
