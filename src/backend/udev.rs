@@ -123,6 +123,29 @@ pub fn init(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> an
         LibSeatSession::new().map_err(|e| anyhow::anyhow!("session libseat: {e}"))?;
     let seat = session.seat();
     info!("siège {seat}");
+
+    // Pause et reprise de la session (changement de console). Inscrite avant
+    // l'ouverture du GPU : sous LightDM, la session n'est activée qu'après le
+    // lancement du compositeur, quand le greeter rend l'écran ; ouvrir le GPU
+    // avant échoue (« Unable to become drm master », Permission denied).
+    // Attente de l'activation, 10 s au plus, comme wlroots
+    event_loop
+        .handle()
+        .insert_source(notifier, |event, _, state| state.udev_session(event))
+        .map_err(|e| anyhow::anyhow!("session: {e}"))?;
+    if !session.is_active() {
+        info!("attente de l'activation de la session");
+        let limit = std::time::Instant::now() + Duration::from_secs(10);
+        while !session.is_active() && std::time::Instant::now() < limit {
+            event_loop
+                .dispatch(Some(Duration::from_millis(100)), state)
+                .map_err(|e| anyhow::anyhow!("session: {e}"))?;
+        }
+        if !session.is_active() {
+            anyhow::bail!("session {seat} jamais activée");
+        }
+        info!("session activée");
+    }
     let path: PathBuf = primary_gpu(&seat)?
         .or_else(|| smithay::backend::udev::all_gpus(&seat).ok()?.into_iter().next())
         .ok_or_else(|| anyhow::anyhow!("aucun GPU"))?;
@@ -168,12 +191,6 @@ pub fn init(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> an
             DrmEvent::Error(e) => warn!("DRM: {e}"),
         })
         .map_err(|e| anyhow::anyhow!("DRM: {e}"))?;
-
-    // Pause et reprise de la session (changement de console)
-    event_loop
-        .handle()
-        .insert_source(notifier, |event, _, state| state.udev_session(event))
-        .map_err(|e| anyhow::anyhow!("session: {e}"))?;
 
     // Écrans branchés ou débranchés
     let udev = UdevBackend::new(&seat)?;

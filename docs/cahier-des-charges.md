@@ -827,5 +827,10 @@ Décidé le 17 novembre 2026 :
     SPICE affichait le sien par-dessus (deux curseurs). Copie modifiée de
     Smithay 0.7.0 dans `vendor/smithay` (`[patch.crates-io]`, détail dans
     `vendor/README.md`), à retirer quand Smithay le gérera.
+19. Ouverture de la session sous LightDM : la session libseat n'est activée
+    qu'après le lancement du compositeur, quand le greeter rend l'écran.
+    Ouvrir le GPU avant échouait (« Unable to become drm master »,
+    Permission denied) et renvoyait à l'écran de connexion. packarch attend
+    l'activation, 10 s au plus, avant d'ouvrir le GPU, comme wlroots.
 
 Aucune question ouverte pour l'instant.
