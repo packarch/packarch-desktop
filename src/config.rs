@@ -65,6 +65,17 @@ impl Button {
     }
 }
 
+/// Fréquence de rafraîchissement variable (`<core><adaptiveSync>`, § 5.2)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdaptiveSync {
+    /// Jamais (par défaut)
+    No,
+    /// Toujours, sur les écrans qui la permettent
+    Yes,
+    /// Seulement quand une vue en plein écran est visible sur l'écran
+    Fullscreen,
+}
+
 /// Politique de placement des nouvelles vues (§ 8.2)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
@@ -188,6 +199,7 @@ pub struct Config {
     pub xwayland_persistence: bool,
     /// Clients X11 rendus à l'échelle de l'écran (nets) au lieu d'être agrandis
     pub xwayland_sharp: bool,
+    pub adaptive_sync: AdaptiveSync,
     pub placement: Placement,
     // theme
     pub theme_name: String,
@@ -283,6 +295,7 @@ impl Default for Config {
             gap: 0,
             xwayland_persistence: false,
             xwayland_sharp: false,
+            adaptive_sync: AdaptiveSync::No,
             placement: Placement::Automatic,
             theme_name: String::new(),
             icon_theme: String::new(),
@@ -691,7 +704,18 @@ impl Config {
                 "gap" => r.int(c, &mut self.gap),
                 "xwaylandpersistence" => r.bool(c, &mut self.xwayland_persistence),
                 "xwaylandsharp" => r.bool(c, &mut self.xwayland_sharp),
-                "adaptivesync" | "reuseoutputmode" | "allowtearing" => {}
+                "adaptivesync" => match text(c).trim().to_ascii_lowercase().as_str() {
+                    "fullscreen" => self.adaptive_sync = AdaptiveSync::Fullscreen,
+                    v => match parse_bool(v) {
+                        Some(true) => self.adaptive_sync = AdaptiveSync::Yes,
+                        Some(false) => self.adaptive_sync = AdaptiveSync::No,
+                        None => r.warn(
+                            c,
+                            format!("adaptiveSync: yes, no ou fullscreen attendu, pas « {v} »"),
+                        ),
+                    },
+                },
+                "reuseoutputmode" | "allowtearing" => {}
                 _ => r.unknown(c, "core"),
             }
         }
@@ -1053,6 +1077,23 @@ mod tests {
             c.parse(&format!("<{root}/>")).unwrap();
         }
         assert!(Config::default().parse("<sway/>").is_err());
+    }
+
+    #[test]
+    fn adaptive_sync() {
+        let read = |v: &str| {
+            let mut c = Config::default();
+            c.parse(&format!(
+                "<openbox_config><core><adaptiveSync>{v}</adaptiveSync></core></openbox_config>"
+            ))
+            .unwrap();
+            (c.adaptive_sync, c.warnings.len())
+        };
+        assert_eq!(Config::default().adaptive_sync, AdaptiveSync::No);
+        assert_eq!(read("yes"), (AdaptiveSync::Yes, 0));
+        assert_eq!(read("no"), (AdaptiveSync::No, 0));
+        assert_eq!(read(" Fullscreen "), (AdaptiveSync::Fullscreen, 0));
+        assert_eq!(read("souvent"), (AdaptiveSync::No, 1));
     }
 
     #[test]

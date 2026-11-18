@@ -188,6 +188,8 @@ pub struct State {
     /// Bus D-Bus propre à la session (adresse, processus), quand une autre
     /// session est active
     pub private_bus: Option<(String, i32)>,
+    /// Synchronisation explicite (linux-drm-syncobj-v1), si le GPU la permet
+    pub syncobj_state: Option<smithay::wayland::drm_syncobj::DrmSyncobjState>,
     /// Surfaces qui ont demandé le cadre du compositeur par la décoration KDE
     pub kde_ssd: Vec<WlSurface>,
     /// Dernière zone utile connue de chaque écran (barres)
@@ -377,6 +379,7 @@ impl State {
             session_target: false,
             keybinds_off: false,
             private_bus: None,
+            syncobj_state: None,
             zones: std::collections::HashMap::new(),
             kde_ssd: vec![],
         }

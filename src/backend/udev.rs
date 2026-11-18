@@ -12,7 +12,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
-use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode};
+use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, VrrSupport};
 use smithay::backend::egl::{EGLContext, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
@@ -54,6 +54,8 @@ struct Surface {
     dirty: bool,
     /// Un rendu est déjà prévu
     scheduled: bool,
+    /// Fréquence variable possible (VRR_CAPABLE du connecteur)
+    vrr: VrrSupport,
 }
 
 pub struct Udev {
@@ -165,6 +167,17 @@ pub fn init(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> an
     let context = EGLContext::new(&display)?;
     let mut renderer = unsafe { GlesRenderer::new(context)? };
     init_renderer(state, &mut renderer);
+    // Synchronisation explicite (§ 9.2): proposée seulement si le pilote
+    // sait attendre un point de synchronisation (syncobj_eventfd)
+    if smithay::wayland::drm_syncobj::supports_syncobj_eventfd(&fd) {
+        state.syncobj_state = Some(smithay::wayland::drm_syncobj::DrmSyncobjState::new::<State>(
+            &state.dh,
+            fd.clone(),
+        ));
+        info!("synchronisation explicite (linux-drm-syncobj-v1) proposée");
+    } else {
+        info!("synchronisation explicite non prise en charge par le pilote");
+    }
 
     // Entrées
     let mut libinput = Libinput::new_with_udev(LibinputSessionInterface::from(session.clone()));
@@ -220,6 +233,29 @@ pub fn init(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> an
         warn!("aucun écran branché");
     }
     Ok(())
+}
+
+/// Active ou coupe la fréquence variable d'un écran, si elle est possible.
+/// Avec changement de mode, seulement pour `adaptiveSync` à yes (une fois) :
+/// un changement de mode à chaque plein écran ferait clignoter l'écran.
+fn set_vrr(s: &mut Surface, want: bool) {
+    let allowed = match s.vrr {
+        VrrSupport::NotSupported => false,
+        VrrSupport::RequiresModeset => want || s.compositor.vrr_enabled(),
+        VrrSupport::Supported => true,
+    };
+    if !allowed || s.compositor.vrr_enabled() == want {
+        return;
+    }
+    let name = s.output.name();
+    match s.compositor.use_vrr(want) {
+        Ok(()) if want => info!("{name}: fréquence variable activée"),
+        Ok(()) => info!("{name}: fréquence variable coupée"),
+        Err(e) => {
+            warn!("{name}: fréquence variable: {e:?}");
+            s.vrr = VrrSupport::NotSupported;
+        }
+    }
 }
 
 /// Nom d'un connecteur (`DP-2`, `HDMI-A-1`)
@@ -392,6 +428,16 @@ impl State {
                 mode.size().1,
                 mode.vrefresh()
             );
+            let vrr = compositor
+                .vrr_supported(info.handle())
+                .unwrap_or(VrrSupport::NotSupported);
+            match vrr {
+                VrrSupport::NotSupported => info!("{name}: pas de fréquence variable"),
+                VrrSupport::RequiresModeset => {
+                    info!("{name}: fréquence variable possible (avec changement de mode)")
+                }
+                VrrSupport::Supported => info!("{name}: fréquence variable possible"),
+            }
             self.outputs.push(output.clone());
             u.surfaces.insert(
                 crtc,
@@ -405,6 +451,7 @@ impl State {
                     off: false,
                     dirty: true,
                     scheduled: false,
+                    vrr,
                 },
             );
         }
@@ -464,6 +511,22 @@ impl State {
         }
     }
 
+    /// Fréquence variable voulue sur un écran (`adaptiveSync`): toujours, ou
+    /// avec une vue en plein écran visible sur lui
+    fn want_vrr(&self, output: &Output) -> bool {
+        use crate::config::AdaptiveSync;
+        match self.config.adaptive_sync {
+            AdaptiveSync::No => false,
+            AdaptiveSync::Yes => true,
+            AdaptiveSync::Fullscreen => {
+                let rect = self.output_geometry(output);
+                self.views.iter().any(|v| {
+                    v.tiling == crate::view::Tiling::Fullscreen && self.visible(v) && rect.contains(v.loc)
+                })
+            }
+        }
+    }
+
     /// Dessine un écran; le suivant le sera au vblank s'il a encore changé
     fn udev_render(&mut self, crtc: crtc::Handle) {
         let Some(Backend::Udev(mut u)) = self.backend.take() else {
@@ -489,8 +552,10 @@ impl State {
         elements.extend(output_elements(self, &mut u.renderer, &output));
         crate::protocols::screencopy::process(self, &mut u.renderer, &output, &elements);
         let animating = self.animating();
+        let want_vrr = self.want_vrr(&output);
         let s = u.surfaces.get_mut(&crtc).unwrap();
         s.dirty = animating;
+        set_vrr(s, want_vrr);
         let mut queued = false;
         s.compositor.set_cursor_hotspot(self.cursor_hotspot);
         match s.compositor.render_frame(

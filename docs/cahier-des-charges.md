@@ -197,7 +197,7 @@ marqués **P**, ils sont prioritaires) :
 
 | Section | Réglages |
 |---|---|
-| `core` | `decoration` (server/client) **P**, `gap` **P**, `xwaylandPersistence` **P**, `xwaylandSharp`, `adaptiveSync`, `reuseOutputMode` |
+| `core` | `decoration` (server/client) **P**, `gap` **P**, `xwaylandPersistence` **P**, `xwaylandSharp`, `adaptiveSync` (no, yes, fullscreen), `reuseOutputMode` |
 | `placement` | `policy` (automatic, cursor, center) **P** |
 | `theme` | `name` **P**, `icon` **P**, `titlebar/layout` **P**, `titlebar/showTitle` **P**, `cornerRadius` **P**, `keepBorder` **P**, `dropShadows` **P**, `dropShadowsOnTiled` **P**, `font place=` (ActiveWindow, InactiveWindow, MenuHeader, MenuItem, OnScreenDisplay ; `name`, `size`, `weight`, `slant`) **P** |
 | `margin` | `top`, `bottom`, `left`, `right` **P** |
@@ -535,6 +535,7 @@ priorité 3, § 15).
 | security-context | Flatpak |
 | xdg-dialog, xdg-toplevel-icon | Dialogues modaux, icônes de fenêtre |
 | tearing-control | Jeux (si `adaptiveSync`) |
+| linux-drm-syncobj (synchronisation explicite) | Jeux Vulkan, Firefox, XWayland : indispensable avec le pilote NVIDIA |
 
 ### 9.3 Portails
 
@@ -852,5 +853,16 @@ Décidé le 17 novembre 2026 :
 21. Ressources X : le script de session de LightDM lance xrdb avant le
     compositeur, sans serveur X. packarch fusionne `/etc/X11/Xresources` et
     `~/.Xresources` dans XWayland dès qu'il est prêt.
+22. Synchronisation explicite (linux-drm-syncobj-v1, version 1.3) :
+    proposée seulement si le pilote sait attendre un point de
+    synchronisation (`syncobj_eventfd` : NVIDIA 560 et suivants, Mesa
+    récent). Le commit d'un tampon dmabuf est retenu jusqu'au point
+    d'acquisition du client ; sans synchronisation explicite, jusqu'à la
+    barrière implicite du dmabuf. Le rendu n'attend jamais un client lent.
+23. Fréquence variable (`<core><adaptiveSync>`, version 1.3) : `no` par
+    défaut, `yes` sur tous les écrans qui la permettent, `fullscreen`
+    seulement quand une vue en plein écran est visible sur l'écran. Un écran
+    qui ne la change qu'avec un changement de mode ne la reçoit qu'avec
+    `yes` (une fois) : sinon il clignoterait à chaque plein écran.
 
 Aucune question ouverte pour l'instant.

@@ -137,7 +137,11 @@ Sections de
 .BR decoration " (server, client : cadre des fenêtres dont l'application n'exprime pas de préférence ; celles qui dessinent leur barre de titre la gardent seule), " gap ", " xwaylandPersistence ,
 .B xwaylandSharp
 (yes : les applications X11 sont rendues à l'échelle du plus grand
-écran, nettes, au lieu d'être agrandies ; no par défaut).
+écran, nettes, au lieu d'être agrandies ; no par défaut),
+.B adaptiveSync
+(fréquence de rafraîchissement variable, FreeSync ou G\-Sync : no par
+défaut, yes sur les écrans qui la permettent, fullscreen seulement avec
+une fenêtre en plein écran).
 .TP
 .B placement
 .BR policy " (automatic, cursor, center)."

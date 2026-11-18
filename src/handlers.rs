@@ -11,6 +11,7 @@ use smithay::desktop::{
 use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
+use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecoMode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_output, wl_seat, wl_surface::WlSurface};
@@ -19,10 +20,12 @@ use smithay::utils::Transform;
 use smithay::utils::{Point, Serial};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, SurfaceData, get_parent, is_sync_subsurface,
-    send_surface_state, with_states,
+    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+    SurfaceData, add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, send_surface_state,
+    with_states,
 };
-use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
+use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf};
+use smithay::wayland::drm_syncobj::DrmSyncobjCachedState;
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::selection::data_device::{
@@ -81,6 +84,7 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         with_states(surface, |data| surface_scale(self, surface, data));
+        add_commit_blockers(surface);
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -98,6 +102,68 @@ impl CompositorHandler for State {
         self.commit_popup(surface);
         self.commit_layer(surface);
     }
+}
+
+/// Retient chaque commit d'un tampon dmabuf jusqu'à ce que le GPU du client
+/// ait fini de le dessiner: point d'acquisition de linux-drm-syncobj-v1
+/// (synchronisation explicite), sinon barrière implicite du dmabuf. Le rendu
+/// n'attend ainsi jamais un client lent, et ne montre jamais une image à
+/// moitié dessinée (pilote NVIDIA: synchronisation explicite seulement).
+fn add_commit_blockers(surface: &WlSurface) {
+    add_pre_commit_hook::<State, _>(surface, |state, _dh, surface| {
+        let (acquire, dmabuf) = with_states(surface, |data| {
+            let acquire = data
+                .cached_state
+                .get::<DrmSyncobjCachedState>()
+                .pending()
+                .acquire_point
+                .clone();
+            let dmabuf = match data
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .pending()
+                .buffer
+                .as_ref()
+            {
+                Some(BufferAssignment::NewBuffer(buffer)) => get_dmabuf(buffer).cloned().ok(),
+                _ => None,
+            };
+            (acquire, dmabuf)
+        });
+        let Some(dmabuf) = dmabuf else { return };
+        let Some(client) = surface.client() else { return };
+        let release = move |state: &mut State| {
+            let dh = state.dh.clone();
+            state.client_compositor_state(&client).blocker_cleared(state, &dh);
+        };
+        if let Some(point) = acquire {
+            // Point déjà signalé (ou erreur): le commit passe tout de suite.
+            // La barrière implicite n'a pas de sens avec un point d'acquisition
+            if let Ok((blocker, source)) = point.generate_blocker()
+                && state
+                    .handle
+                    .insert_source(source, move |_, _, state| {
+                        release(state);
+                        Ok(())
+                    })
+                    .is_ok()
+            {
+                add_blocker(surface, blocker);
+            }
+            return;
+        }
+        if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ)
+            && state
+                .handle
+                .insert_source(source, move |_, _, state| {
+                    release(state);
+                    Ok(())
+                })
+                .is_ok()
+        {
+            add_blocker(surface, blocker);
+        }
+    });
 }
 
 impl State {

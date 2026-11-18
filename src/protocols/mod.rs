@@ -414,3 +414,12 @@ delegate_content_type!(State);
 impl smithay::wayland::tablet_manager::TabletSeatHandler for State {}
 delegate_cursor_shape!(State);
 delegate_presentation!(State);
+
+// Synchronisation explicite (§ 9.2): les images du client ne sont montrées
+// qu'une fois son point d'acquisition signalé (voir handlers.rs)
+impl smithay::wayland::drm_syncobj::DrmSyncobjHandler for State {
+    fn drm_syncobj_state(&mut self) -> Option<&mut smithay::wayland::drm_syncobj::DrmSyncobjState> {
+        self.syncobj_state.as_mut()
+    }
+}
+smithay::delegate_drm_syncobj!(State);
