@@ -1,0 +1,19 @@
+# Images de référence à l'échelle 1,5 : coins, ombres et titres nets.
+#reference
+#! --scale 1.5 --no-animations
+wait 300
+spawn client-essai --title un --size 400x260 --color 3a6ea5
+wait-views 1 5000
+spawn client-essai --title deux --size 300x200 --color c0603a
+wait-views 2 5000
+move 20 20
+wait 300
+capture 1-fenetres.png
+compare 1-fenetres.png ref/1-fenetres.png
+combo 125 57
+wait-menu 1 2000
+move 20 20
+wait 300
+capture 2-menu.png
+compare 2-menu.png ref/2-menu.png
+quit

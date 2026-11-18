@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<!--
+  Configuration figée des scénarios de référence (tests/capture.sh, ligne
+  « #reference » du scénario) : thème Essai (copie d'OB-Packarch-Packarch,
+  dans data/themes), polices DejaVu Sans, ni fond d'écran ni barre, aucune
+  icône ; les captures ne dépendent que du compositeur et des polices.
+-->
+<packarch_config>
+  <core>
+    <decoration>server</decoration>
+    <gap>0</gap>
+  </core>
+  <placement>
+    <policy>center</policy>
+  </placement>
+  <theme>
+    <name>Essai</name>
+    <titlebar>
+      <layout>:iconify,max,close</layout>
+      <showTitle>yes</showTitle>
+    </titlebar>
+    <cornerRadius>8</cornerRadius>
+    <keepBorder>yes</keepBorder>
+    <dropShadows>yes</dropShadows>
+    <font place="ActiveWindow"><name>DejaVu Sans</name><size>10</size><weight>bold</weight></font>
+    <font place="InactiveWindow"><name>DejaVu Sans</name><size>10</size></font>
+    <font place="MenuHeader"><name>DejaVu Sans</name><size>10</size><weight>bold</weight></font>
+    <font place="MenuItem"><name>DejaVu Sans</name><size>10</size></font>
+    <font place="OnScreenDisplay"><name>DejaVu Sans</name><size>10</size><weight>bold</weight></font>
+  </theme>
+  <windowSwitcher preview="no" outlines="no">
+    <osd show="yes" style="classic" output="all" />
+    <fields>
+      <field content="title" width="100%" />
+    </fields>
+  </windowSwitcher>
+  <resistance>
+    <screenEdgeStrength>0</screenEdgeStrength>
+    <windowEdgeStrength>0</windowEdgeStrength>
+  </resistance>
+  <keyboard>
+    <keybind key="W-space"><action name="ShowMenu" menu="root-menu" /></keybind>
+    <keybind key="A-Tab"><action name="NextWindow" /></keybind>
+  </keyboard>
+</packarch_config>

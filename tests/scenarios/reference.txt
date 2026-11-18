@@ -1,0 +1,46 @@
+# Images de référence (§ 13) : fenêtres unies du client de test, coins et
+# ombres, maximisation, menu racine et sous-menu, liste Alt+Tab.
+# Configuration figée (tests/essai), références dans tests/references/reference.
+#reference
+#! --no-animations
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5
+wait-views 1 5000
+spawn client-essai --title deux --size 420x280 --color c0603a
+wait-views 2 5000
+move 20 20
+wait 300
+capture 1-fenetres.png
+compare 1-fenetres.png ref/1-fenetres.png
+action <action name="Maximize"/>
+wait 300
+capture 2-maximisee.png
+compare 2-maximisee.png ref/2-maximisee.png
+action <action name="Unmaximize"/>
+wait 300
+# Menu racine (Super+Espace), puis sous-menu
+combo 125 57
+wait-menu 1 2000
+move 20 20
+wait 200
+capture 3-menu.png
+compare 3-menu.png ref/3-menu.png
+point-menu Outils
+wait-menu 2 2000
+wait 300
+capture 4-sous-menu.png
+compare 4-sous-menu.png ref/4-sous-menu.png
+key 1
+key 1
+wait 200
+expect-menu none
+# Liste Alt+Tab, Alt tenu
+keydown 56
+key 15
+wait 300
+capture 5-alt-tab.png
+compare 5-alt-tab.png ref/5-alt-tab.png
+keyup 56
+wait 200
+expect-focus un
+quit

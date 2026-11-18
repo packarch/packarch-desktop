@@ -39,5 +39,13 @@ wayland-protocols-wlr = { version = "0.3.12", features = ["server"] }
 wayland-server = "0.31"
 xcursor = "0.3"
 
+# Client de test des scénarios (tests/capture.sh) : fenêtre d'une couleur unie
+[dev-dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
+
+[[example]]
+name = "client-essai"
+
 [profile.release]
 debug = "line-tables-only"

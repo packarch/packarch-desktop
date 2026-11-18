@@ -800,4 +800,14 @@ Décidé le 17 novembre 2026 :
     dans une texture puis agrandie (lissée, ou pixels nets avec
     `useFilter=no`) ; le curseur n'est pas agrandi.
 
+16. Images de référence (§ 13) : client de test `client-essai` (exemple
+    Cargo, fenêtre xdg-shell d'une couleur unie qui demande le cadre du
+    compositeur) ; configuration figée dans `tests/essai` (thème Essai,
+    copie d'OB-Packarch-Packarch, polices DejaVu Sans, sans fond ni barre,
+    sans icône, clavier `us`) ; étape `compare` des scénarios marqués
+    `#reference`, références dans `tests/references`, écart nul exigé par
+    défaut (le rendu headless est déterministe), `tests/capture.sh --update`
+    pour les refaire. Les captures dépendent des polices installées : les
+    références se refont sur une autre machine.
+
 Aucune question ouverte pour l'instant.

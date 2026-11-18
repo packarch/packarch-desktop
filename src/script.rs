@@ -41,6 +41,9 @@
 //! clock-advance 50       l'avance de 50 ms
 //! clock-run              la remet en marche
 //! capture /tmp/a.png     capture de l'écran (backend headless)
+//! compare a.png ref/a.png 2   attend la capture (3 s au plus) et la compare
+//!                        à l'image de référence : chaque composante à
+//!                        2 niveaux près au plus (0 par défaut)
 //! quit
 //! ```
 
@@ -90,6 +93,7 @@ pub enum Step {
     ClockAdvance(u64),
     ClockRun,
     Capture(PathBuf),
+    Compare(PathBuf, PathBuf, u8),
     Quit,
 }
 
@@ -220,6 +224,16 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 "clock-advance" => Step::ClockAdvance(num(args.next())? as u64),
                 "clock-run" => Step::ClockRun,
                 "capture" => Step::Capture(PathBuf::from(rest)),
+                "compare" => {
+                    let usage = "compare CAPTURE RÉFÉRENCE [tolérance]";
+                    let got = args.next().ok_or(usage)?;
+                    let reference = args.next().ok_or(usage)?;
+                    let tolerance = match args.next() {
+                        Some(t) => t.parse().map_err(|_| format!("tolérance: {t}"))?,
+                        None => 0,
+                    };
+                    Step::Compare(PathBuf::from(got), PathBuf::from(reference), tolerance)
+                }
                 "quit" => Step::Quit,
                 _ => return Err(format!("commande inconnue: {cmd}")),
             })
@@ -521,6 +535,18 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                     }
                     _ => warn!("script: capture possible seulement avec --backend headless"),
                 },
+                Step::Compare(got, reference, tolerance) => {
+                    // La capture est écrite au rendu suivant
+                    let start = *waiting_since.get_or_insert_with(Instant::now);
+                    if std::fs::metadata(&got).is_err() && start.elapsed() < Duration::from_secs(3) {
+                        return TimeoutAction::ToDuration(Duration::from_millis(50));
+                    }
+                    waiting_since = None;
+                    match compare(&got, &reference, tolerance) {
+                        Ok(()) => info!("script: {} conforme à la référence", got.display()),
+                        Err(e) => fail(state, format!("{}: {e}", got.display())),
+                    }
+                }
                 Step::Quit => {
                     info!("script: fin");
                     state.signal.stop();
@@ -530,6 +556,63 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
             TimeoutAction::ToDuration(Duration::from_millis(delay))
         },
     );
+}
+
+/// Image RGBA 8 bits d'un fichier PNG
+fn read_png(path: &std::path::Path) -> Result<(u32, u32, Vec<u8>), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut dec = png::Decoder::new(std::io::BufReader::new(file));
+    dec.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
+    let mut reader = dec.read_info().map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if info.color_type != png::ColorType::Rgba {
+        return Err(format!("{}: couleurs {:?}", path.display(), info.color_type));
+    }
+    buf.truncate(info.buffer_size());
+    Ok((info.width, info.height, buf))
+}
+
+/// Écarts entre deux images RGBA de même taille : nombre de pixels dont une
+/// composante s'écarte de plus de `tolerance`, plus grand écart, et premier
+/// pixel en défaut
+fn diff(width: u32, a: &[u8], b: &[u8], tolerance: u8) -> (usize, u8, Option<(u32, u32)>) {
+    let (mut count, mut max, mut first) = (0, 0, None);
+    for (i, (pa, pb)) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0).enumerate() {
+        let d = pa.iter().zip(pb).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0);
+        max = max.max(d);
+        if d > tolerance {
+            count += 1;
+            first.get_or_insert((i as u32 % width, i as u32 / width));
+        }
+    }
+    (count, max, first)
+}
+
+/// Compare une capture à son image de référence
+fn compare(got: &std::path::Path, reference: &std::path::Path, tolerance: u8) -> Result<(), String> {
+    if std::fs::metadata(reference).is_err() {
+        return Err(format!(
+            "référence {} absente (tests/capture.sh --update)",
+            reference.display()
+        ));
+    }
+    let (w, h, a) = read_png(got)?;
+    let (rw, rh, b) = read_png(reference)?;
+    if (w, h) != (rw, rh) {
+        return Err(format!("{w} × {h} au lieu de {rw} × {rh}"));
+    }
+    match diff(w, &a, &b, tolerance) {
+        (0, _, _) => Ok(()),
+        (n, max, first) => {
+            let (x, y) = first.unwrap_or_default();
+            Err(format!(
+                "{n} pixels différents de la référence (écart jusqu'à {max}, le premier en ({x}, {y}))"
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -545,5 +628,19 @@ mod tests {
         assert_eq!(s[4], Step::Click(BTN_LEFT));
         assert_eq!(s[6], Step::Quit);
         assert!(parse("vole").is_err());
+        assert_eq!(
+            parse("compare a.png ref/a.png 2").unwrap()[0],
+            Step::Compare("a.png".into(), "ref/a.png".into(), 2)
+        );
+        assert!(parse("compare a.png").is_err());
+    }
+
+    #[test]
+    fn pixel_diff() {
+        let a = [10, 20, 30, 255, 0, 0, 0, 255];
+        let b = [12, 20, 30, 255, 0, 9, 0, 255];
+        assert_eq!(diff(2, &a, &b, 9), (0, 9, None));
+        assert_eq!(diff(2, &a, &b, 2), (1, 9, Some((1, 0))));
+        assert_eq!(diff(2, &a, &b, 1), (2, 9, Some((0, 0))));
     }
 }

@@ -41,6 +41,10 @@ cargo build
 ./target/debug/packarch -C ~/.config/labwc
 # Sans écran, scénarios d'essai (tests/scenarios), captures dans target/captures :
 tests/capture.sh
+# Captures comparées aux images de référence (tests/references) :
+tests/capture.sh tests/scenarios/reference*.txt
+# Après un changement voulu du rendu, refaire les références :
+tests/capture.sh --update tests/scenarios/reference*.txt
 ```
 
 Options cachées pour les essais : `--backend headless`, `--size 1920x1200`,

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu des scénarios de référence : sans icône -->
+<openbox_menu>
+  <menu id="root-menu" label="Packarch">
+    <item label="Terminal"><action name="Execute" command="true" /></item>
+    <item label="Gestionnaire de fichiers"><action name="Execute" command="true" /></item>
+    <separator />
+    <menu id="outils" label="Outils">
+      <item label="Capture d'écran"><action name="Execute" command="true" /></item>
+      <item label="Pipette"><action name="Execute" command="true" /></item>
+    </menu>
+    <separator label="Session" />
+    <item label="Quitter"><action name="Exit" /></item>
+  </menu>
+</openbox_menu>
