@@ -729,6 +729,7 @@ packarch [OPTIONS]
 | **0.4 session** | Backend udev, plusieurs écrans, verrouillage, inactivité, capture, barre des tâches, bureaux (avec glissement), Alt+Tab | Une journée de travail sur packarch-test sans retour à labwc |
 | **0.5 XWayland** | X11Wm, règles de fenêtres, collage et régions, portails | Steam, LibreOffice et un jeu X11 utilisables ; début de l'intégration (§ 11) |
 | **1.0** | Priorité 2 des actions, finitions, documentation `man` | Bureau par défaut de Packarch |
+| **1.1** | `xwaylandSharp`, quarts d'écran (`combine`), loupe, images de référence (§ 13) | Rendu protégé par les scénarios de référence |
 
 ---
 
