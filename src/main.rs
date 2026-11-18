@@ -104,9 +104,11 @@ fn main() {
             "info,smithay=warn"
         })
     });
-    // Journal sur la sortie d'erreur (§ 12)
+    // Journal sur la sortie d'erreur (§ 12), sans codes couleur quand elle
+    // n'est pas un terminal (fichier ~/.local/state/packarch.log)
     tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_writer(std::io::stderr)
         .init();
     if cli.reconfigure || cli.exit {

@@ -326,15 +326,25 @@ impl State {
             };
             let name = connector_name(&info);
             let (w, h) = info.size().unwrap_or((0, 0));
+            // Fabricant, modèle et numéro de série de l'EDID (kanshi, wlr-randr)
+            let id = super::edid::read(u.node.dev_id(), &name).unwrap_or_else(|| super::edid::Identity {
+                make: "Inconnu".into(),
+                model: name.clone(),
+                serial: String::new(),
+            });
+            info!("{name}: {} {} {}", id.make, id.model, id.serial);
             let output = Output::new(
                 name.clone(),
                 PhysicalProperties {
                     size: (w as i32, h as i32).into(),
                     subpixel: Subpixel::Unknown,
-                    make: "Inconnu".into(),
-                    model: name.clone(),
+                    make: id.make,
+                    model: id.model,
                 },
             );
+            output
+                .user_data()
+                .insert_if_missing(|| super::edid::Serial(id.serial));
             let global = output.create_global::<State>(&self.dh);
             let omode = OutputMode::from(mode);
             // Les écrans sont posés côte à côte, de gauche à droite

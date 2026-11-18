@@ -3,6 +3,7 @@
 //! headless (sans écran, pour les tests et les captures), udev (session
 //! réelle).
 
+pub mod edid;
 pub mod headless;
 pub mod udev;
 pub mod winit;

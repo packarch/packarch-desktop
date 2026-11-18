@@ -92,6 +92,7 @@ impl State {
                     state.child_env.retain(|(k, _)| k != "DISPLAY");
                     state.child_env.push(("DISPLAY".into(), var));
                     state.export_session_env();
+                    state.load_xresources();
                     state.run_autostart();
                 }
                 XWaylandEvent::Error => {
@@ -166,6 +167,43 @@ impl State {
                 let _ = x.configure(None);
             }
         }
+    }
+
+    /// Ressources X du système et de l'utilisateur (`/etc/X11/Xresources`,
+    /// `~/.Xresources`) chargées dans XWayland par xrdb s'il est installé:
+    /// le script de session de LightDM les charge avant le compositeur, quand
+    /// aucun serveur X n'existe encore (« xrdb: Can't open display '' »)
+    fn load_xresources(&self) {
+        let Some(n) = self.xwayland.display else { return };
+        let home = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".Xresources"));
+        let files: Vec<_> = [Some(std::path::PathBuf::from("/etc/X11/Xresources")), home]
+            .into_iter()
+            .flatten()
+            .filter(|f| f.is_file())
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+        // Dans un fil: le compositeur ne bloque pas, l'ordre des fichiers est gardé
+        std::thread::spawn(move || {
+            for f in files {
+                let status = std::process::Command::new("xrdb")
+                    .arg("-merge")
+                    .arg(&f)
+                    .env("DISPLAY", format!(":{n}"))
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .status();
+                match status {
+                    Ok(s) if s.success() => info!("ressources X: {}", f.display()),
+                    Ok(s) => warn!("xrdb {}: {s}", f.display()),
+                    Err(e) => {
+                        tracing::debug!("xrdb: {e}");
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     /// `Xft.dpi` dans les ressources X (Qt, Xft), par xrdb s'il est installé

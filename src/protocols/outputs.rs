@@ -151,6 +151,11 @@ impl State {
         if head.version() >= 2 {
             head.make(output.physical_properties().make);
             head.model(output.physical_properties().model);
+            if let Some(serial) = output.user_data().get::<crate::backend::edid::Serial>()
+                && !serial.0.is_empty()
+            {
+                head.serial_number(serial.0.clone());
+            }
         }
         Some(Head {
             output: output.clone(),

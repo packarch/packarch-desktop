@@ -695,7 +695,8 @@ packarch [OPTIONS]
 - L'instance en cours est trouvée par `PACKARCH_PID`, puis par un fichier
   `$XDG_RUNTIME_DIR/packarch-$WAYLAND_DISPLAY.pid`.
 - Signaux : SIGHUP recharge, SIGTERM quitte proprement.
-- Journal : sortie d'erreur, niveau `info` ; `RUST_LOG` respecté.
+- Journal : sortie d'erreur, niveau `info` ; `RUST_LOG` respecté ; codes
+  couleur seulement vers un terminal.
 
 ---
 
@@ -832,5 +833,11 @@ Décidé le 17 novembre 2026 :
     Ouvrir le GPU avant échouait (« Unable to become drm master »,
     Permission denied) et renvoyait à l'écran de connexion. packarch attend
     l'activation, 10 s au plus, avant d'ouvrir le GPU, comme wlroots.
+20. Identité des écrans : fabricant (nom de hwdata, sinon code PNP), modèle
+    et numéro de série lus dans l'EDID (sysfs), annoncés aux outils
+    d'écrans comme wlroots ; « Inconnu » si l'EDID est illisible.
+21. Ressources X : le script de session de LightDM lance xrdb avant le
+    compositeur, sans serveur X. packarch fusionne `/etc/X11/Xresources` et
+    `~/.Xresources` dans XWayland dès qu'il est prêt.
 
 Aucune question ouverte pour l'instant.
