@@ -1,0 +1,20 @@
+# Cadre selon la demande du client (xdg-decoration, décoration KDE de GTK3) :
+# Packarch Hello (GTK3 à GtkHeaderBar) dessine sa barre de titre, sans
+# cadre du compositeur ; yad (GTK3 sans GtkHeaderBar) et kitty
+# (xdg-decoration) prennent le cadre du compositeur.
+#! --size 1920x1080
+wait 800
+spawn packarch-hello
+wait-views 1 10000
+wait 1500
+spawn yad --title yad-essai --text essai --width 400 --height 200
+wait-views 2 10000
+wait 1500
+spawn kitty -o confirm_os_window_close=0 -T kitty-essai -e sh -c 'sleep 60'
+wait-views 3 10000
+wait 1500
+expect-decorated Packarch Hello no
+expect-decorated kitty-essai yes
+expect-decorated yad-essai yes
+capture 1-decorations.png
+quit

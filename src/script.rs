@@ -29,6 +29,7 @@
 //! expect-grown un 40 0   vérifie son changement de taille depuis `mark`
 //! expect-shaded un yes   vérifie l'enroulement (yes/no)
 //! expect-visible un no   vérifie l'affichage (réduite, autre bureau…)
+//! expect-decorated un yes vérifie le cadre du compositeur
 //! expect-menu root-menu prefs   vérifie les menus ouverts (none: aucun)
 //! wait-menu 2 5000       attend 2 menus ouverts (pipemenus, 5 s au plus)
 //! point-menu Terminal    pointeur sur l'entrée de ce libellé
@@ -82,6 +83,7 @@ pub enum Step {
     ExpectGrown(String, i32, i32),
     ExpectShaded(String, bool),
     ExpectVisible(String, bool),
+    ExpectDecorated(String, bool),
     ExpectMenu(Vec<String>),
     WaitMenu(usize, u64),
     PointMenu(String),
@@ -155,7 +157,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 }
                 "move-by" => Step::MoveBy(num(args.next())?, num(args.next())?),
                 "mark" => Step::Mark(rest.to_string()),
-                "expect-moved" | "expect-grown" | "expect-shaded" | "expect-visible" => {
+                "expect-moved" | "expect-grown" | "expect-shaded" | "expect-visible" | "expect-decorated" => {
                     let v: Vec<&str> = rest.split_whitespace().collect();
                     let n = v.len();
                     if cmd == "expect-moved" || cmd == "expect-grown" {
@@ -176,10 +178,10 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                         }
                         let b = crate::config::parse_bool(v[n - 1]).ok_or("yes ou no")?;
                         let t = v[..n - 1].join(" ");
-                        if cmd == "expect-shaded" {
-                            Step::ExpectShaded(t, b)
-                        } else {
-                            Step::ExpectVisible(t, b)
+                        match cmd {
+                            "expect-shaded" => Step::ExpectShaded(t, b),
+                            "expect-decorated" => Step::ExpectDecorated(t, b),
+                            _ => Step::ExpectVisible(t, b),
                         }
                     }
                 }
@@ -420,17 +422,17 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                         _ => fail(state, format!("expect-grown: « {title} » sans mark")),
                     }
                 }
-                Step::ExpectShaded(title, b) | Step::ExpectVisible(title, b) => {
-                    let shaded = matches!(step, Step::ExpectShaded(..));
+                Step::ExpectShaded(title, b)
+                | Step::ExpectVisible(title, b)
+                | Step::ExpectDecorated(title, b) => {
                     match state.views.iter().position(|v| v.title() == title) {
                         Some(i) => {
-                            let got = if shaded {
-                                state.views[i].shaded
-                            } else {
-                                state.visible(&state.views[i])
+                            let (got, what) = match step {
+                                Step::ExpectShaded(..) => (state.views[i].shaded, "enroulée"),
+                                Step::ExpectDecorated(..) => (state.views[i].decorated, "avec cadre"),
+                                _ => (state.visible(&state.views[i]), "affichée"),
                             };
                             if got != b {
-                                let what = if shaded { "enroulée" } else { "affichée" };
                                 fail(state, format!("« {title} » {what}: {got} au lieu de {b}"));
                             }
                         }

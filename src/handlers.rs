@@ -590,14 +590,11 @@ impl XdgDecorationHandler for State {
         toplevel.with_pending_state(|s| s.decoration_mode = Some(mode));
     }
 
-    /// `core/decoration` à `server`: le cadre du compositeur, toujours;
-    /// à `client`: celui que le client demande
+    /// Le mode demandé par le client est respecté, comme sous labwc: une
+    /// application qui dessine sa barre de titre (GtkHeaderBar) n'en a pas
+    /// deux. `core/decoration` ne vaut que pour les clients sans préférence
+    /// (`unset_mode`); la règle de fenêtre `serverDecoration` impose le cadre
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecoMode) {
-        let mode = if self.config.server_decoration {
-            DecoMode::ServerSide
-        } else {
-            mode
-        };
         if let Some(i) = self.view_of(&toplevel) {
             self.views[i].decorated = mode == DecoMode::ServerSide;
         }
@@ -608,7 +605,12 @@ impl XdgDecorationHandler for State {
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        XdgDecorationHandler::request_mode(self, toplevel, DecoMode::ServerSide);
+        let mode = if self.config.server_decoration {
+            DecoMode::ServerSide
+        } else {
+            DecoMode::ClientSide
+        };
+        XdgDecorationHandler::request_mode(self, toplevel, mode);
     }
 }
 
@@ -617,14 +619,14 @@ impl KdeDecorationHandler for State {
         &self.kde_decoration_state
     }
 
-    /// GTK3: décoration par le serveur (mode par défaut), souvent annoncée
-    /// avant le rôle de fenêtre
+    /// GTK3: mode par défaut (`core/decoration`) jusqu'à la demande du
+    /// client, souvent annoncée avant le rôle de fenêtre
     fn new_decoration(
         &mut self,
         surface: &WlSurface,
         _decoration: &smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::OrgKdeKwinServerDecoration,
     ) {
-        self.set_kde_ssd(surface, true);
+        self.set_kde_ssd(surface, self.config.server_decoration);
     }
 
     fn request_mode(
@@ -637,8 +639,9 @@ impl KdeDecorationHandler for State {
     ) {
         use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode;
         if let smithay::reexports::wayland_server::WEnum::Value(m) = mode {
-            let server = m == Mode::Server || self.config.server_decoration;
-            let m = if server { Mode::Server } else { m };
+            // GTK3 demande Client pour une fenêtre à GtkHeaderBar
+            // (Packarch Hello, Firefox), Server pour les autres (Thunar)
+            let server = m == Mode::Server;
             self.set_kde_ssd(surface, server);
             decoration.mode(m);
         }

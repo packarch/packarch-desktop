@@ -498,7 +498,7 @@ priorité 3, § 15).
 | wl_compositor, wl_subcompositor, wl_shm, linux-dmabuf v4+ | Tous les clients |
 | wl_seat, wl_output, xdg-output | Tous les clients, waybar |
 | xdg-shell (toplevel, popup, positionner) | Applications |
-| xdg-decoration (forcer le cadre du compositeur) | GTK, Qt, kitty |
+| xdg-decoration, décoration KDE (cadre du compositeur quand le client le demande) | GTK, Qt, kitty |
 | wlr-layer-shell | waybar, rofi, mako, swaybg, hyprlock (fond) |
 | wl_data_device, primary-selection | Copier-coller |
 | viewporter, fractional-scale | Mise à l'échelle 1,25 / 1,5 nette |
@@ -811,5 +811,12 @@ Décidé le 17 novembre 2026 :
     défaut (le rendu headless est déterministe), `tests/capture.sh --update`
     pour les refaire. Les captures dépendent des polices installées : les
     références se refont sur une autre machine.
+
+17. Cadre des fenêtres (comme labwc) : le mode demandé par le client
+    (xdg-decoration, décoration KDE de GTK3) est respecté ; une application
+    à GtkHeaderBar (Packarch Hello, Firefox) dessine seule sa barre de
+    titre. `core/decoration` ne vaut que pour les clients sans préférence,
+    et donne le mode par défaut annoncé à GTK3 ; la règle de fenêtre
+    `serverDecoration` impose ou retire le cadre.
 
 Aucune question ouverte pour l'instant.

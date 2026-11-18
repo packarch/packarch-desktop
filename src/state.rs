@@ -218,10 +218,16 @@ impl State {
         let compositor_state = CompositorState::new::<State>(&dh);
         let xdg_shell_state = XdgShellState::new::<State>(&dh);
         let xdg_decoration_state = XdgDecorationState::new::<State>(&dh);
-        let kde_decoration_state = KdeDecorationState::new::<State>(
-            &dh,
-            smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode::Server,
-        );
+        // Mode par défaut annoncé aux clients GTK3: celui de `core/decoration`
+        let kde_decoration_state = {
+            use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode;
+            let mode = if config.server_decoration {
+                Mode::Server
+            } else {
+                Mode::Client
+            };
+            KdeDecorationState::new::<State>(&dh, mode)
+        };
         let layer_shell_state = WlrLayerShellState::new::<State>(&dh);
         let shm_state = ShmState::new::<State>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<State>(&dh);
