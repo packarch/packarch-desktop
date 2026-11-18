@@ -875,6 +875,11 @@ Décidé le 17 novembre 2026 :
     image sans changement. Avant, chaque rendu de chaque écran les envoyait
     à toutes les surfaces, à l'heure du rendu : sur deux écrans à 60 Hz,
     XWayland voyait 120 Hz et les vidéos des lecteurs X11 (Nounours
-    Player) saccadaient.
+    Player) saccadaient. Version 1.3.2 : le contenu des fenêtres dessinées
+    hors écran (coins arrondis, animations) est une texture dont l'élément
+    change d'identifiant à chaque image ; leurs surfaces sont ajoutées aux
+    états du rendu avec la partie visible de la fenêtre sur l'écran. Sans
+    cela elles passaient pour invisibles (un rappel par seconde : saisie et
+    sélection en retard).
 
 Aucune question ouverte pour l'instant.

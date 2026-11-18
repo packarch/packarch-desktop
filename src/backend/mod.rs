@@ -13,7 +13,10 @@ use std::time::Duration;
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::backend::renderer::element::{RenderElementStates, default_primary_scanout_output_compare};
+use smithay::backend::renderer::element::{
+    Id, RenderElementPresentationState, RenderElementState, RenderElementStates,
+    default_primary_scanout_output_compare,
+};
 use smithay::desktop::utils::{
     OutputPresentationFeedback, send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
     surface_primary_scanout_output, take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
@@ -24,7 +27,7 @@ use smithay::desktop::{PopupManager, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::wayland::compositor::SurfaceData;
+use smithay::wayland::compositor::{SurfaceData, TraversalAction, with_surface_tree_downward};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::presentation::Refresh;
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufState};
@@ -94,6 +97,8 @@ pub fn after_render(
     let time = state.start.elapsed();
     state.confirm_lock();
     let surfaces = all_surfaces(state);
+    let states = states.map(|s| with_offscreen_states(state, output, s));
+    let states = states.as_ref();
     if let Some(states) = states {
         for s in &surfaces {
             with_surfaces_surface_tree(s, |surface, data| {
@@ -133,6 +138,49 @@ pub fn after_render(
     state.popups.cleanup();
     let _ = state.dh.flush_clients();
     feedback
+}
+
+/// États du rendu complétés par les fenêtres dessinées hors écran : leur
+/// contenu est une texture dont l'élément change d'identifiant à chaque
+/// image, leurs surfaces n'y figurent donc pas. Sans cet ajout elles
+/// passeraient pour invisibles (un rappel de trame par seconde : tout
+/// répond avec retard). Chaque surface de l'arbre reçoit la partie visible
+/// du cadre sur cet écran.
+fn with_offscreen_states(
+    state: &State,
+    output: &Output,
+    states: &RenderElementStates,
+) -> RenderElementStates {
+    let mut states = states.clone();
+    let screen = state.output_geometry(output);
+    let scale = output.current_scale().fractional_scale();
+    for (surface, rect) in &state.offscreen_shown {
+        let Some(visible) = rect.intersection(screen) else {
+            continue;
+        };
+        let area = visible.to_f64().to_physical(scale).to_i32_round::<i32>();
+        let area = (area.size.w.max(0) as usize) * (area.size.h.max(0) as usize);
+        if area == 0 {
+            continue;
+        }
+        let shown = RenderElementState {
+            visible_area: area,
+            presentation_state: RenderElementPresentationState::Rendering { reason: None },
+        };
+        with_surface_tree_downward(
+            surface,
+            (),
+            |_, _, _| TraversalAction::DoChildren(()),
+            |s, _, _| {
+                let entry = states.states.entry(Id::from_wayland_resource(s)).or_insert(shown);
+                if entry.visible_area < area {
+                    *entry = shown;
+                }
+            },
+            |_, _, _| true,
+        );
+    }
+    states
 }
 
 /// Retour de présentation immédiat (winit, headless : pas de vblank connu)

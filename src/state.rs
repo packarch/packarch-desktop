@@ -163,6 +163,10 @@ pub struct State {
     /// Verrouillage (ext-session-lock) et surfaces de verrouillage par écran
     pub lock: crate::protocols::Lock,
     pub lock_surfaces: Vec<(Output, smithay::wayland::session_lock::LockSurface)>,
+    /// Fenêtres dessinées par leur texture hors écran au dernier rendu
+    /// (surface, cadre du contenu) : leurs surfaces n'apparaissent pas dans
+    /// les états du rendu, `after_render` les y ajoute
+    pub offscreen_shown: Vec<(WlSurface, Rectangle<i32, Logical>)>,
     /// Surfaces qui empêchent la mise en veille (vidéos)
     pub idle_inhibitors: Vec<WlSurface>,
     /// Curseur demandé par le client sous le pointeur
@@ -357,6 +361,7 @@ impl State {
             protocols,
             lock: crate::protocols::Lock::Unlocked,
             lock_surfaces: vec![],
+            offscreen_shown: vec![],
             idle_inhibitors: vec![],
             cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
             cursor_hotspot: None,

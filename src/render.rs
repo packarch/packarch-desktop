@@ -438,6 +438,7 @@ pub struct MagnifierTexture {
 /// Éléments d'un écran, du premier plan vers l'arrière-plan, avec la loupe
 /// devant s'il le faut
 pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Output) -> Vec<Elem> {
+    state.offscreen_shown.clear();
     let scene = scene_elements(state, renderer, output);
     // Pixels nets dans la loupe si demandé (s'applique à tout l'écran pendant
     // qu'elle est ouverte)
@@ -1327,10 +1328,11 @@ fn view_elements(
         match render_offscreen(renderer, view, scale) {
             Ok(()) => {
                 let off = view.offscreen.as_ref().unwrap();
+                let rect = Rectangle::new(view.loc, geo.size);
                 content = Some(Content {
                     texture: off.texture.clone(),
                     id: off.id.clone(),
-                    rect: Rectangle::new(view.loc, geo.size),
+                    rect,
                     radius: inner_radius,
                 });
             }
@@ -1366,6 +1368,10 @@ fn view_elements(
         &snap, renderer, progs, scale, output_loc, alpha, live,
     ));
     view.last = Some(snap);
+    if let Some(c) = &view.last.as_ref().unwrap().content {
+        let rect = c.rect;
+        state.offscreen_shown.push((surface, rect));
+    }
     elements
 }
 
