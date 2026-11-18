@@ -284,6 +284,15 @@ marqués **P**, ils sont prioritaires) :
   Ces variables sont aussi envoyées au gestionnaire de session de systemd
   et à D-Bus (`dbus-update-activation-environment --systemd`), pour les
   portails et les services.
+- Cible systemd `packarch-session.target` (comme sway-systemd et niri) :
+  démarrée après l'export de l'environnement, avant le script `autostart` ;
+  elle active `graphical-session.target` et `xdg-desktop-autostart.target`
+  (entrées XDG autostart lancées par systemd, sans `dex`). Arrêtée à la fin
+  de la session : systemd arrête les services liés à la session, même les
+  programmes détachés par `setsid` (applet de cachy-update), qui sinon
+  survivent avec l'affichage d'une session disparue. Une cible restée
+  active (arrêt brutal) est arrêtée puis redémarrée. Rien de tout cela en
+  session imbriquée ou quand une autre session est active.
 
 ### 5.7 Rechargement
 

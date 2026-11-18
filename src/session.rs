@@ -12,6 +12,9 @@ use tracing::{info, warn};
 use crate::env;
 use crate::state::State;
 
+/// Cible systemd de la session (`data/packarch-session.target`)
+const SESSION_TARGET: &str = "packarch-session.target";
+
 /// Fichier du numéro de processus d'une instance
 pub fn pid_file(display: &str) -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join(format!("packarch-{display}.pid")))
@@ -82,6 +85,11 @@ impl State {
             return;
         }
         self.env_exported = true;
+        self.spawn(&self.export_command());
+    }
+
+    /// Commande qui envoie les variables de la session à systemd et à D-Bus
+    fn export_command(&self) -> String {
         let names = [
             "WAYLAND_DISPLAY",
             "DISPLAY",
@@ -94,9 +102,29 @@ impl State {
             .into_iter()
             .filter(|n| self.child_env.iter().any(|(k, _)| k == n))
             .collect();
-        self.spawn(&format!(
+        format!(
             "dbus-update-activation-environment --systemd {}",
             present.join(" ")
+        )
+    }
+
+    /// Démarre `packarch-session.target`, comme les autres compositeurs
+    /// (sway-systemd, niri): `graphical-session.target` et les entrées XDG
+    /// autostart deviennent des services de systemd, arrêtés à la fin de la
+    /// session (§ 5.6). Seulement si l'environnement a été exporté (session
+    /// réelle, seule). Une cible restée active (session précédente arrêtée
+    /// brutalement) est d'abord arrêtée: ses services ont un environnement
+    /// périmé.
+    fn start_session_target(&mut self) {
+        if !self.env_exported {
+            return;
+        }
+        self.session_target = true;
+        // Environnement exporté avant le démarrage, dans la même commande:
+        // les services doivent voir DISPLAY et WAYLAND_DISPLAY
+        self.spawn(&format!(
+            "{}; systemctl --user stop {SESSION_TARGET}; systemctl --user start {SESSION_TARGET}",
+            self.export_command()
         ));
     }
 
@@ -171,6 +199,7 @@ impl State {
         if std::mem::replace(&mut self.autostarted, true) {
             return;
         }
+        self.start_session_target();
         let autostart = self.config.dir.join("autostart");
         if autostart.is_file() {
             info!("autostart: {}", autostart.display());
@@ -189,6 +218,13 @@ impl State {
             unsafe {
                 libc::kill(pid, libc::SIGTERM);
             }
+        }
+        // Services de la session (autostart XDG, waybar.service…): systemd
+        // les arrête, même détachés par setsid
+        if self.session_target {
+            let _ = std::process::Command::new("systemctl")
+                .args(["--user", "stop", "--no-block", SESSION_TARGET])
+                .status();
         }
         // Les variables exportées ne doivent pas survivre à la session
         if self.env_exported {

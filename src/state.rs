@@ -183,6 +183,8 @@ pub struct State {
     pub autostarted: bool,
     /// L'environnement a été exporté vers systemd et D-Bus
     pub env_exported: bool,
+    /// `packarch-session.target` a été démarrée
+    pub session_target: bool,
     /// Bus D-Bus propre à la session (adresse, processus), quand une autre
     /// session est active
     pub private_bus: Option<(String, i32)>,
@@ -372,6 +374,7 @@ impl State {
             },
             autostarted: false,
             env_exported: false,
+            session_target: false,
             keybinds_off: false,
             private_bus: None,
             zones: std::collections::HashMap::new(),

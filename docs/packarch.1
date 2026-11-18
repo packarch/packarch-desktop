@@ -296,6 +296,14 @@ Les programmes lancés reçoivent
 .BR XDG_SESSION_TYPE=wayland " et " PACKARCH_PID .
 Sur une console, ces variables sont aussi envoyées à systemd et D\-Bus,
 sauf si une autre session graphique du même utilisateur est active.
+packarch démarre alors
+.BR packarch\-session.target ,
+qui active
+.B graphical\-session.target
+et les entrées XDG autostart
+.RI ( /etc/xdg/autostart ", " ~/.config/autostart )
+comme services de systemd ; à la fin de la session, la cible est arrêtée
+et systemd arrête ces programmes, même détachés de la session.
 .B RUST_LOG
 règle le journal, écrit sur la sortie d'erreur.
 .SH SIGNAUX

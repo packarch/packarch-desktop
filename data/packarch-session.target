@@ -1,0 +1,13 @@
+# Session graphique Packarch, démarrée et arrêtée par packarch.
+# Active graphical-session.target (services de session : waybar.service,
+# mako.service…) et xdg-desktop-autostart.target (entrées de
+# /etc/xdg/autostart et ~/.config/autostart). À l'arrêt, systemd arrête tout
+# ce qui en dépend, même les programmes détachés de la session (setsid).
+[Unit]
+Description=Session graphique Packarch
+Documentation=man:packarch(1)
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target
+Wants=xdg-desktop-autostart.target
+Before=xdg-desktop-autostart.target
