@@ -305,12 +305,7 @@ impl State {
             });
         }
         for i in 0..self.views.len() {
-            match self.views[i].tiling.clone() {
-                crate::view::Tiling::Maximized(a) => self.maximize(i, a),
-                crate::view::Tiling::Edge(e) => self.snap_to_edge(i, e),
-                crate::view::Tiling::Region(r) => self.snap_to_region(i, &r),
-                _ => {}
-            }
+            self.reapply_tiling(i, self.views[i].tiling.clone());
         }
     }
 

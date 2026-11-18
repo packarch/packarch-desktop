@@ -26,8 +26,8 @@ use crate::bindings::{Context, Mods, MouseButton, MouseEvent, ScrollDir, find_ke
 use crate::config::Button;
 use crate::deco::{Edges, Part};
 use crate::state::{Press, State, Under};
-use crate::view::{Edge, Tiling};
-use crate::wm::{Origin, edge_rect, resist, snap_edge};
+use crate::view::{Snap, Tiling};
+use crate::wm::{Origin, resist, snap_edge, snap_rect};
 
 pub const BTN_LEFT: u32 = 0x110;
 pub const BTN_RIGHT: u32 = 0x111;
@@ -835,7 +835,7 @@ pub struct MoveGrab {
     /// Lancé au clavier: fini au prochain clic
     pub keyboard: bool,
     /// Bord visé par le pointeur (collage au relâchement)
-    pub snap: Option<Edge>,
+    pub snap: Option<Snap>,
 }
 
 /// Redimensionnement d'une vue à la souris
@@ -1129,9 +1129,10 @@ impl PointerGrab<State> for MoveGrab {
             zone_here,
             event.location,
             data.config.snap_inner,
+            data.config.snap_corner,
             data.config.top_maximize,
         );
-        data.snap_preview = self.snap.map(|e| edge_rect(zone_here, e, data.config.gap));
+        data.snap_preview = self.snap.map(|s| snap_rect(zone_here, s, data.config.gap));
         // Nouveau rectangle: son animation commence maintenant
         if data.snap_preview != data.snap_shown.map(|(r, _)| r) {
             let now = data.now();
@@ -1151,10 +1152,10 @@ impl PointerGrab<State> for MoveGrab {
             handle.unset_grab(self, data, event.serial, event.time, true);
             data.snap_preview = None;
             data.cursor_status = CursorImageStatus::default_named();
-            if let Some(edge) = self.snap.take()
+            if let Some(snap) = self.snap.take()
                 && let Some(i) = data.window_index(&self.window)
             {
-                data.snap_to_edge(i, edge);
+                data.snap(i, snap);
             }
         }
     }

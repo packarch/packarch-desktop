@@ -44,12 +44,63 @@ pub enum Edge {
     Center,
 }
 
+/// Quart de la zone utile (collage combiné de deux bords)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Corner {
+    pub up: bool,
+    pub left: bool,
+}
+
+/// Collage: moitié (ou zone entière) le long d'un bord, ou quart
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Snap {
+    Edge(Edge),
+    Corner(Corner),
+}
+
+impl Snap {
+    /// Collage combiné (`SnapToEdge combine="yes"`, à la labwc): la
+    /// nouvelle direction remplace celle du même axe et garde l'autre;
+    /// gauche puis haut donne le quart en haut à gauche
+    pub fn combine(current: &Tiling, dir: Edge) -> Snap {
+        // Composantes (verticale, horizontale) du collage en cours
+        let (v, h) = match current {
+            Tiling::Edge(Edge::Up) => (Some(true), None),
+            Tiling::Edge(Edge::Down) => (Some(false), None),
+            Tiling::Edge(Edge::Left) => (None, Some(true)),
+            Tiling::Edge(Edge::Right) => (None, Some(false)),
+            Tiling::Corner(c) => (Some(c.up), Some(c.left)),
+            _ => (None, None),
+        };
+        let corner = match dir {
+            Edge::Up | Edge::Down => h.map(|left| Corner {
+                up: dir == Edge::Up,
+                left,
+            }),
+            Edge::Left | Edge::Right => v.map(|up| Corner {
+                up,
+                left: dir == Edge::Left,
+            }),
+            Edge::Center => None,
+        };
+        corner.map_or(Snap::Edge(dir), Snap::Corner)
+    }
+
+    pub fn tiling(self) -> Tiling {
+        match self {
+            Snap::Edge(e) => Tiling::Edge(e),
+            Snap::Corner(c) => Tiling::Corner(c),
+        }
+    }
+}
+
 /// Géométrie imposée par le compositeur
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tiling {
     None,
     Maximized(Axis),
     Edge(Edge),
+    Corner(Corner),
     Region(String),
     Fullscreen,
 }

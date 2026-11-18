@@ -11,8 +11,10 @@ arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `man -l docs/packarch.1`).
 
 - Fenêtres décorées par le compositeur (thèmes Openbox, coins arrondis,
-  ombres), couches layer-shell, XWayland.
-- `rc.xml` complet : raccourcis (AZERTY), souris, bureaux, collage, régions,
+  ombres), couches layer-shell, XWayland (option `xwaylandSharp` pour des
+  applications X11 nettes à l'échelle 1,25 ou 1,5).
+- `rc.xml` complet : raccourcis (AZERTY), souris, bureaux, collage (moitiés et
+  quarts d'écran), régions,
   règles de fenêtres, toutes les actions de priorité 1 et 2 (`If`,
   `ForEach`, `MoveToEdge`, `MoveToOutput`…), rechargement.
 - Menus de `menu.xml` arrondis et ombrés, pipemenus, menu de fenêtre, liste
@@ -24,9 +26,9 @@ arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
   verrouillage, inactivité, barre des tâches et bureaux de waybar, capture,
   wlr-randr, wlopm, presse-papiers des outils, portails.
 
-Pas encore : loupe (`ZoomIn`/`ZoomOut`, priorité 3), quarts d'écran
-(`SnapToEdge combine="yes"`), XWayland lancé à la première connexion X11
-(impossible avec Smithay 0.7, voir le cahier des charges, § 15).
+Pas encore : loupe (`ZoomIn`/`ZoomOut`, priorité 3), XWayland lancé à la
+première connexion X11 (impossible avec Smithay 0.7, voir le cahier des
+charges, § 15).
 
 ## Essayer
 

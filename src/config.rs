@@ -214,6 +214,8 @@ pub struct Config {
     pub raise_on_focus: bool,
     pub snap_inner: i32,
     pub snap_outer: i32,
+    /// Distance d'un coin où un déplacement colle dans un quart (0: jamais)
+    pub snap_corner: i32,
     pub top_maximize: bool,
     pub desktop_names: Vec<String>,
     pub desktop_popup_ms: u32,
@@ -318,6 +320,7 @@ impl Default for Config {
             raise_on_focus: false,
             snap_inner: 10,
             snap_outer: 10,
+            snap_corner: 50,
             top_maximize: true,
             desktop_names: vec!["1".into(), "2".into(), "3".into(), "4".into()],
             desktop_popup_ms: 500,
@@ -608,6 +611,7 @@ impl Config {
                                 }
                             }
                             "topmaximize" => r.bool(c, &mut self.top_maximize),
+                            "cornerrange" => r.int(c, &mut self.snap_corner),
                             _ => r.unknown(c, "snapping"),
                         }
                     }

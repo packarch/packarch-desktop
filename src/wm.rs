@@ -16,7 +16,7 @@ use crate::deco::Edges;
 use crate::input::{BTN_LEFT, BTN_RIGHT, MoveGrab, ResizeGrab};
 use crate::state::{Cycle, State};
 use crate::theme::Theme;
-use crate::view::{Axis, Edge, Stack, Tiling};
+use crate::view::{Axis, Corner, Edge, Snap, Stack, Tiling};
 
 /// Origine d'une action: la souris (bouton et position de l'appui) ou le
 /// clavier
@@ -59,6 +59,23 @@ pub fn edge_rect(zone: Rectangle<i32, Logical>, edge: Edge, gap: i32) -> Rectang
         Edge::Up | Edge::Center => zone,
     };
     inset(r, gap)
+}
+
+/// Rectangle d'un collage: moitié le long d'un bord ou quart de la zone
+pub fn snap_rect(zone: Rectangle<i32, Logical>, snap: Snap, gap: i32) -> Rectangle<i32, Logical> {
+    match snap {
+        Snap::Edge(e) => edge_rect(zone, e, gap),
+        Snap::Corner(c) => {
+            let (x, y, w, h) = (zone.loc.x, zone.loc.y, zone.size.w, zone.size.h);
+            let (x, w) = if c.left {
+                (x, w / 2)
+            } else {
+                (x + w / 2, w - w / 2)
+            };
+            let (y, h) = if c.up { (y, h / 2) } else { (y + h / 2, h - h / 2) };
+            inset(Rectangle::new((x, y).into(), (w, h).into()), gap)
+        }
+    }
 }
 
 /// Position la moins recouverte pour un cadre de taille `size` dans `zone`
@@ -104,29 +121,44 @@ pub fn least_overlap(
     best.1
 }
 
-/// Bord vers lequel coller une vue déplacée, selon la position du pointeur
+/// Collage d'une vue déplacée, selon la position du pointeur: un bord, ou
+/// un quart quand le pointeur est aussi à moins de `corner` d'un coin
 pub fn snap_edge(
     zone: Rectangle<i32, Logical>,
     p: Point<f64, Logical>,
     range: i32,
+    corner: i32,
     top_maximize: bool,
-) -> Option<Edge> {
+) -> Option<Snap> {
     if range <= 0 {
         return None;
     }
-    let r = range as f64;
+    let (r, c) = (range as f64, corner.max(0) as f64);
     let (x0, y0) = (zone.loc.x as f64, zone.loc.y as f64);
     let (x1, y1) = (x0 + zone.size.w as f64, y0 + zone.size.h as f64);
-    if p.x < x0 + r {
-        Some(Edge::Left)
-    } else if p.x >= x1 - r {
-        Some(Edge::Right)
-    } else if p.y < y0 + r {
-        top_maximize.then_some(Edge::Up)
-    } else if p.y >= y1 - r {
-        Some(Edge::Down)
+    // Côté (gauche ou non, haut ou non) sous le pointeur, à `d` près
+    let side = |v: f64, lo: f64, hi: f64, d: f64| {
+        if v < lo + d {
+            Some(true)
+        } else if v >= hi - d {
+            Some(false)
+        } else {
+            None
+        }
+    };
+    let corner_of = |up, left| (c > 0.0).then_some(Snap::Corner(Corner { up, left }));
+    if let Some(left) = side(p.x, x0, x1, r) {
+        let quarter = side(p.y, y0, y1, c).and_then(|up| corner_of(up, left));
+        return quarter.or(Some(Snap::Edge(if left { Edge::Left } else { Edge::Right })));
+    }
+    let up = side(p.y, y0, y1, r)?;
+    if let Some(q) = side(p.x, x0, x1, c).and_then(|left| corner_of(up, left)) {
+        return Some(q);
+    }
+    if up {
+        top_maximize.then_some(Snap::Edge(Edge::Up))
     } else {
-        None
+        Some(Snap::Edge(Edge::Down))
     }
 }
 
@@ -419,6 +451,10 @@ impl State {
                         s.states.set(st);
                     }
                 }
+                Tiling::Corner(c) => {
+                    s.states.set(if c.left { S::TiledLeft } else { S::TiledRight });
+                    s.states.set(if c.up { S::TiledTop } else { S::TiledBottom });
+                }
                 Tiling::Edge(e) => {
                     let states: &[S] = match e {
                         Edge::Left => &[S::TiledLeft, S::TiledTop, S::TiledBottom],
@@ -454,7 +490,9 @@ impl State {
         let from = self.frame_rect(i);
         let current = self.views[i].tiling.clone();
         self.views[i].prev_tiling = match (&current, &tiling) {
-            (Tiling::Edge(_) | Tiling::Region(_), Tiling::Maximized(_)) => Some(current.clone()),
+            (Tiling::Edge(_) | Tiling::Corner(_) | Tiling::Region(_), Tiling::Maximized(_)) => {
+                Some(current.clone())
+            }
             (_, Tiling::Maximized(_)) => self.views[i].prev_tiling.take(),
             _ => None,
         };
@@ -495,10 +533,10 @@ impl State {
         // Maximisée depuis un collage: elle y retourne
         if matches!(self.views[i].tiling, Tiling::Maximized(_) | Tiling::Fullscreen) {
             match self.views[i].prev_tiling.take() {
-                Some(Tiling::Edge(e)) => {
+                Some(t @ (Tiling::Edge(_) | Tiling::Corner(_))) => {
                     self.views[i].tiling = Tiling::None;
                     let saved = self.views[i].saved;
-                    self.snap_to_edge(i, e);
+                    self.reapply_tiling(i, t);
                     self.views[i].saved = saved;
                     return;
                 }
@@ -565,7 +603,7 @@ impl State {
             self.views[i].saved = Some(Rectangle::new(self.views[i].loc, geo.size));
         }
         self.views[i].prev_tiling = match &self.views[i].tiling {
-            t @ (Tiling::Edge(_) | Tiling::Region(_)) => Some(t.clone()),
+            t @ (Tiling::Edge(_) | Tiling::Corner(_) | Tiling::Region(_)) => Some(t.clone()),
             _ => None,
         };
         self.views[i].shaded = false;
@@ -576,9 +614,26 @@ impl State {
     }
 
     pub fn snap_to_edge(&mut self, i: usize, edge: Edge) {
+        self.snap(i, Snap::Edge(edge));
+    }
+
+    /// Colle une vue à un bord ou dans un quart de sa zone utile
+    pub fn snap(&mut self, i: usize, snap: Snap) {
         let zone = self.view_zone(i);
-        let frame = edge_rect(zone, edge, self.config.gap);
-        self.set_tiling(i, Tiling::Edge(edge), frame);
+        let frame = snap_rect(zone, snap, self.config.gap);
+        self.set_tiling(i, snap.tiling(), frame);
+    }
+
+    /// Réapplique une géométrie imposée (zone utile ou cadre changés);
+    /// plein écran et vue libre ne changent pas
+    pub fn reapply_tiling(&mut self, i: usize, tiling: Tiling) {
+        match tiling {
+            Tiling::Maximized(a) => self.maximize(i, a),
+            Tiling::Edge(e) => self.snap(i, Snap::Edge(e)),
+            Tiling::Corner(c) => self.snap(i, Snap::Corner(c)),
+            Tiling::Region(r) => self.snap_to_region(i, &r),
+            Tiling::None | Tiling::Fullscreen => {}
+        }
     }
 
     pub fn snap_to_region(&mut self, i: usize, name: &str) {
@@ -994,9 +1049,19 @@ impl State {
                 }
             }
             MoveToOutput(target) => self.move_to_output(i, target),
-            SnapToEdge(edge) => self.snap_to_edge(i, *edge),
+            SnapToEdge { edge, combine } => {
+                let snap = if *combine {
+                    Snap::combine(&self.views[i].tiling, *edge)
+                } else {
+                    Snap::Edge(*edge)
+                };
+                self.snap(i, snap);
+            }
             UnSnap => {
-                if matches!(self.views[i].tiling, Tiling::Edge(_) | Tiling::Region(_)) {
+                if matches!(
+                    self.views[i].tiling,
+                    Tiling::Edge(_) | Tiling::Corner(_) | Tiling::Region(_)
+                ) {
                     self.restore(i);
                 }
             }
@@ -1045,9 +1110,6 @@ impl State {
                 continue;
             }
             match self.views[i].tiling.clone() {
-                Tiling::Maximized(a) => self.maximize(i, a),
-                Tiling::Edge(e) => self.snap_to_edge(i, e),
-                Tiling::Region(r) => self.snap_to_region(i, &r),
                 Tiling::Fullscreen => {}
                 Tiling::None => {
                     if f.loc.y < zone.loc.y && f.loc.y + f.size.h > zone.loc.y {
@@ -1055,6 +1117,7 @@ impl State {
                         self.configure(i, None);
                     }
                 }
+                t => self.reapply_tiling(i, t),
             }
             if let Some(v) = self.views.get_mut(i) {
                 v.geom_anim = None;
@@ -1184,15 +1247,13 @@ impl State {
             saved.loc += shift;
         }
         match self.views[i].tiling.clone() {
-            Tiling::Maximized(a) => self.maximize(i, a),
-            Tiling::Edge(e) => self.snap_to_edge(i, e),
-            Tiling::Region(r) => self.snap_to_region(i, &r),
             Tiling::Fullscreen => {
                 let g = self.output_geometry(&dst);
                 self.views[i].loc = g.loc;
                 self.configure(i, Some(g.size));
             }
             Tiling::None => self.configure(i, Option::None),
+            t => self.reapply_tiling(i, t),
         }
     }
 
@@ -1392,12 +1453,7 @@ impl State {
         self.update_xwayland_scale();
         // Les vues imposées suivent les nouvelles marges et le nouveau cadre
         for i in 0..self.views.len() {
-            match self.views[i].tiling.clone() {
-                Tiling::Maximized(a) => self.maximize(i, a),
-                Tiling::Edge(e) => self.snap_to_edge(i, e),
-                Tiling::Region(r) => self.snap_to_region(i, &r),
-                _ => {}
-            }
+            self.reapply_tiling(i, self.views[i].tiling.clone());
         }
     }
 
@@ -1456,13 +1512,77 @@ mod tests {
         assert_eq!(edge_rect(zone, Edge::Left, 0), rect(0, 38, 640, 724));
         assert_eq!(edge_rect(zone, Edge::Right, 0), rect(640, 38, 640, 724));
         assert_eq!(edge_rect(zone, Edge::Up, 10), rect(10, 48, 1260, 704));
-        assert_eq!(snap_edge(zone, (3.0, 300.0).into(), 10, true), Some(Edge::Left));
-        assert_eq!(snap_edge(zone, (600.0, 40.0).into(), 10, true), Some(Edge::Up));
-        assert_eq!(snap_edge(zone, (600.0, 40.0).into(), 10, false), None);
-        assert_eq!(snap_edge(zone, (600.0, 400.0).into(), 10, true), None);
+        let e = |e| Some(Snap::Edge(e));
+        assert_eq!(snap_edge(zone, (3.0, 300.0).into(), 10, 50, true), e(Edge::Left));
+        assert_eq!(snap_edge(zone, (600.0, 40.0).into(), 10, 50, true), e(Edge::Up));
+        assert_eq!(snap_edge(zone, (600.0, 40.0).into(), 10, 50, false), None);
+        assert_eq!(snap_edge(zone, (600.0, 400.0).into(), 10, 50, true), None);
+        assert_eq!(
+            snap_edge(zone, (600.0, 760.0).into(), 10, 50, true),
+            e(Edge::Down)
+        );
+        // Près d'un coin: quart, le long d'un bord vertical ou horizontal
+        let q = |up, left| Some(Snap::Corner(Corner { up, left }));
+        assert_eq!(snap_edge(zone, (3.0, 60.0).into(), 10, 50, true), q(true, true));
+        assert_eq!(
+            snap_edge(zone, (1240.0, 40.0).into(), 10, 50, false),
+            q(true, false)
+        );
+        assert_eq!(
+            snap_edge(zone, (1278.0, 740.0).into(), 10, 50, true),
+            q(false, false)
+        );
+        assert_eq!(snap_edge(zone, (3.0, 60.0).into(), 10, 0, true), e(Edge::Left));
+        assert_eq!(
+            snap_rect(
+                zone,
+                Snap::Corner(Corner {
+                    up: false,
+                    left: false
+                }),
+                0
+            ),
+            rect(640, 400, 640, 362)
+        );
+        assert_eq!(
+            snap_rect(zone, Snap::Corner(Corner { up: true, left: true }), 10),
+            rect(10, 48, 620, 342)
+        );
         assert_eq!(
             percent_rect(zone, 50.0, 0.0, 50.0, 100.0),
             rect(640, 38, 640, 724)
+        );
+    }
+
+    #[test]
+    fn combined_snap() {
+        let q = |up, left| Snap::Corner(Corner { up, left });
+        let c = |t: Tiling, d| Snap::combine(&t, d);
+        // Libre ou maximisée: le bord demandé
+        assert_eq!(c(Tiling::None, Edge::Left), Snap::Edge(Edge::Left));
+        assert_eq!(c(Tiling::Maximized(Axis::Both), Edge::Up), Snap::Edge(Edge::Up));
+        // Moitié puis direction perpendiculaire: quart
+        assert_eq!(c(Tiling::Edge(Edge::Left), Edge::Up), q(true, true));
+        assert_eq!(c(Tiling::Edge(Edge::Down), Edge::Right), q(false, false));
+        assert_eq!(c(Tiling::Edge(Edge::Up), Edge::Left), q(true, true));
+        // Moitié puis direction opposée: l'autre moitié
+        assert_eq!(c(Tiling::Edge(Edge::Left), Edge::Right), Snap::Edge(Edge::Right));
+        // Quart: la direction remplace la composante de son axe
+        assert_eq!(
+            c(Tiling::Corner(Corner { up: true, left: true }), Edge::Down),
+            q(false, true)
+        );
+        assert_eq!(
+            c(Tiling::Corner(Corner { up: true, left: true }), Edge::Right),
+            q(true, false)
+        );
+        assert_eq!(
+            c(Tiling::Corner(Corner { up: true, left: true }), Edge::Up),
+            q(true, true)
+        );
+        assert_eq!(
+            c(Tiling::Corner(Corner { up: true, left: true }), Edge::Center),
+            Snap::Edge(Edge::Center)
         );
     }
 

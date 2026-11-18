@@ -1,0 +1,47 @@
+# Quarts d'écran: SnapToEdge combine="yes" et déplacement vers un coin
+# (<snapping><cornerRange>). Zone utile: 0 38 1280 724. Lancé par
+# tests/capture.sh.
+wait 1500
+spawn kitty --config NONE -o confirm_os_window_close=0 -o remember_window_size=no -o initial_window_width=500 -o initial_window_height=300 -T a -e sh -c 'sleep 120'
+wait-views 1 8000
+wait 800
+# Gauche puis haut: quart en haut à gauche
+action <action name="SnapToEdge" direction="left" combine="yes"/>
+wait 400
+expect a 0 38 640 724
+action <action name="SnapToEdge" direction="up" combine="yes"/>
+wait 400
+expect a 0 38 640 362
+capture 01-haut-gauche.png
+# Bas, puis droite: le quart suit la direction
+action <action name="SnapToEdge" direction="down" combine="yes"/>
+wait 400
+expect a 0 400 640 362
+action <action name="SnapToEdge" direction="right" combine="yes"/>
+wait 400
+expect a 640 400 640 362
+# Maximisée puis rendue: elle retourne dans son quart
+action <action name="ToggleMaximize"/>
+wait 400
+expect a 0 38 1280 724
+action <action name="ToggleMaximize"/>
+wait 400
+expect a 640 400 640 362
+# Sans combine: la moitié
+action <action name="SnapToEdge" direction="left"/>
+wait 400
+expect a 0 38 640 724
+action <action name="UnSnap"/>
+wait 400
+# Déplacement à la souris vers le coin en haut à droite: aperçu du quart
+point a title
+press left
+move-by 40 0
+move 1278 60
+wait 300
+capture 02-apercu-coin.png
+release left
+wait 400
+expect a 640 38 640 362
+capture 03-coin.png
+quit

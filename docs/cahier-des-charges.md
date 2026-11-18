@@ -205,7 +205,7 @@ marqués **P**, ils sont prioritaires) :
 | `resistance` | `screenEdgeStrength`, `windowEdgeStrength` **P** |
 | `resize` | `popupShow` (Never, Always, Nonpixel), `drawContents` **P** |
 | `focus` | `followMouse`, `raiseOnFocus` **P** |
-| `snapping` | `range` (`inner`, `outer`), `topMaximize` **P** |
+| `snapping` | `range` (`inner`, `outer`), `topMaximize` **P**, `cornerRange` |
 | `desktops` | `popupTime` (ms), `names/name` (le nombre de noms donne le nombre de bureaux) **P** |
 | `regions` | `region` (`name`, `x`, `y`, `width`, `height` en %) **P** |
 | `keyboard` | `numlock`, `layoutScope` (global, window), `repeatRate`, `repeatDelay`, `keybind` **P** |
@@ -389,7 +389,7 @@ vue active (clavier, menu).
 | `Move`, `Resize` | | Déplacement ou redimensionnement interactif (souris), bord choisi selon la position du pointeur. |
 | `MoveRelative` | `x`, `y` | Déplace de x, y pixels. |
 | `ResizeRelative` | `left`, `right`, `top`, `bottom` | Agrandit ou réduit les bords. |
-| `SnapToEdge` | `direction` (left, right, up, down, center) | Moitié d'écran (haut = maximiser), retour à la taille d'avant en sortant. |
+| `SnapToEdge` | `direction` (left, right, up, down, center), `combine` | Moitié d'écran (haut = maximiser), retour à la taille d'avant en sortant ; `combine=yes` : quarts (§ 15). |
 | `SnapToRegion` | `region` | Place la vue dans une région de `rc.xml`. |
 | `GoToDesktop` | `to` (1…n, left, right, last), `wrap` | Change de bureau. |
 | `SendToDesktop` | `to`, `follow` (yes/no), `wrap` | Envoie la vue sur un bureau. |
@@ -468,7 +468,9 @@ raccourci par défaut), `ZoomIn`/`ZoomOut` (loupe, priorité 3).
   pixels.
 - Amener le pointeur à moins de `range` px d'un bord pendant un
   déplacement : aperçu translucide (coins arrondis), puis moitié d'écran ;
-  bord haut et `topMaximize=yes` : maximisation.
+  bord haut et `topMaximize=yes` : maximisation. À moins de `cornerRange` px
+  (50 par défaut, 0 pour ne jamais le faire) d'un coin le long de ce bord :
+  quart d'écran.
 - Déplacer une vue collée ou maximisée lui rend sa taille d'avant.
 
 ### 8.7 Redimensionnement
@@ -776,5 +778,12 @@ Décidé le 17 novembre 2026 :
     installé). Appliqué à chaud (écrans, rechargement). Les applications X
     qui ne lisent pas le DPI paraissent plus petites : d'où `no` par
     défaut.
+14. Quarts d'écran (`SnapToEdge combine="yes"`, comme labwc) : la nouvelle
+    direction remplace celle du même axe et garde l'autre. Gauche puis
+    haut donne le quart en haut à gauche, puis bas le quart en bas à
+    gauche ; une moitié puis la direction opposée donne l'autre moitié.
+    Une vue maximisée (haut) puis gauche va dans le quart en haut à gauche.
+    Une vue libre, maximisée par l'action `Maximize` ou au centre prend le
+    bord demandé.
 
 Aucune question ouverte pour l'instant.

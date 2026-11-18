@@ -167,7 +167,9 @@ Attributs
 .BR followMouse ", " raiseOnFocus .
 .TP
 .B snapping
-.BR range\ inner= ... "\ outer=" ... ", " topMaximize .
+.BR range\ inner= ... "\ outer=" ... ", " topMaximize ,
+.B cornerRange
+(distance d'un coin où un déplacement colle dans un quart d'écran, 50 par défaut).
 .TP
 .B desktops
 .BR popupTime " (ms), " names/name .
@@ -236,7 +238,7 @@ Géométrie
 .BR Move ", " Resize ", " MoveRelative " (x, y), " ResizeRelative " (left, right, top, bottom), "
 .BR MoveTo " (x, y), " ResizeTo " (width, height), " MoveToCursor ", "
 .BR MoveToEdge " (direction, snapWindows), " GrowToEdge ", " ShrinkToEdge " (direction), "
-.BR SnapToEdge " (direction=left|right|up|down|center), " UnSnap ", "
+.BR SnapToEdge " (direction=left|right|up|down|center, combine=yes pour les quarts d'écran), " UnSnap ", "
 .BR SnapToRegion " (region), " AutoPlace " (policy)."
 .TP
 Bureaux et écrans

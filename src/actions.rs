@@ -53,7 +53,10 @@ pub enum Action {
         top: i32,
         bottom: i32,
     },
-    SnapToEdge(Edge),
+    SnapToEdge {
+        edge: Edge,
+        combine: bool,
+    },
     UnSnap,
     SnapToRegion(String),
     GoToDesktop {
@@ -320,19 +323,18 @@ pub fn parse(node: roxmltree::Node) -> Result<Action, String> {
             top: a.int("top")?,
             bottom: a.int("bottom")?,
         },
-        "snaptoedge" => {
-            // combine="yes" (quarts d'écran en combinant deux bords): accepté,
-            // pas encore appliqué
-            a.bool("combine", false)?;
-            SnapToEdge(match a.get("direction").map(str::to_ascii_lowercase).as_deref() {
+        "snaptoedge" => SnapToEdge {
+            // combine="yes": quarts d'écran en combinant deux bords
+            combine: a.bool("combine", false)?,
+            edge: match a.get("direction").map(str::to_ascii_lowercase).as_deref() {
                 Some("left") => Edge::Left,
                 Some("right") => Edge::Right,
                 Some("up") => Edge::Up,
                 Some("down") => Edge::Down,
                 Some("center") => Edge::Center,
                 v => return Err(format!("SnapToEdge: direction inconnue: {v:?}")),
-            })
-        }
+            },
+        },
         "unsnap" => UnSnap,
         "snaptoregion" => SnapToRegion(a.get("region").ok_or("SnapToRegion sans région")?.to_string()),
         "gotodesktop" => GoToDesktop {
