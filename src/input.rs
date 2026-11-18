@@ -462,6 +462,9 @@ impl State {
             return;
         };
         self.pointer = pos;
+        if self.magnifier.is_some() {
+            self.request_redraw();
+        }
         let under = self.under(pos);
         // Survol des boutons du cadre
         let hovered = match &under {

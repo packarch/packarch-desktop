@@ -216,6 +216,7 @@ pub struct Config {
     pub snap_outer: i32,
     /// Distance d'un coin où un déplacement colle dans un quart (0: jamais)
     pub snap_corner: i32,
+    pub magnifier: crate::magnifier::MagnifierConfig,
     pub top_maximize: bool,
     pub desktop_names: Vec<String>,
     pub desktop_popup_ms: u32,
@@ -321,6 +322,7 @@ impl Default for Config {
             snap_inner: 10,
             snap_outer: 10,
             snap_corner: 50,
+            magnifier: crate::magnifier::MagnifierConfig::default(),
             top_maximize: true,
             desktop_names: vec!["1".into(), "2".into(), "3".into(), "4".into()],
             desktop_popup_ms: 500,
@@ -439,6 +441,13 @@ impl Reader<'_> {
                 node,
                 format!("<{}>: nombre entier attendu", node.tag_name().name()),
             ),
+        }
+    }
+
+    fn float(&mut self, node: roxmltree::Node, target: &mut f64) {
+        match text(node).parse::<f64>() {
+            Ok(v) if v.is_finite() => *target = v,
+            _ => self.warn(node, format!("<{}>: nombre attendu", node.tag_name().name())),
         }
     }
 
@@ -617,6 +626,19 @@ impl Config {
                     }
                 }
                 "desktops" => self.parse_desktops(&mut r, section),
+                "magnifier" => {
+                    let m = &mut self.magnifier;
+                    for c in elements(section) {
+                        match name(c).as_str() {
+                            "width" => r.int(c, &mut m.width),
+                            "height" => r.int(c, &mut m.height),
+                            "initscale" => r.float(c, &mut m.init_scale),
+                            "increment" => r.float(c, &mut m.increment),
+                            "usefilter" => r.bool(c, &mut m.use_filter),
+                            _ => r.unknown(c, "magnifier"),
+                        }
+                    }
+                }
                 "regions" => {
                     self.regions.clear();
                     for c in elements(section) {

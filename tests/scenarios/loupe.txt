@@ -1,0 +1,38 @@
+# Loupe (§ 7.2): ZoomIn, ZoomOut, ToggleMagnify, rectangle qui suit le
+# pointeur. Lancé par tests/capture.sh.
+wait 1500
+spawn kitty --config NONE -o confirm_os_window_close=0 -o remember_window_size=no -o initial_window_width=600 -o initial_window_height=300 -T a -e sh -c 'echo Loupe 0123456789 abcdefghij; sleep 120'
+wait-views 1 8000
+wait 800
+# Au-dessus du texte de kitty
+move 420 280
+action <action name="ZoomIn"/>
+wait 300
+capture 01-loupe.png
+action <action name="ZoomIn"/>
+action <action name="ZoomIn"/>
+wait 300
+capture 02-loupe-x3.png
+# Près d'un bord: la partie hors de l'écran est vide
+move 5 400
+wait 300
+capture 03-bord.png
+# Pas à pas jusqu'à la fermeture (×3 → ×1)
+action <action name="ZoomOut"/>
+action <action name="ZoomOut"/>
+action <action name="ZoomOut"/>
+action <action name="ZoomOut"/>
+wait 300
+capture 04-fermee.png
+# Tout l'écran, pixels nets: le point sous le pointeur ne bouge pas
+spawn sh -c 'sed -i "s|</core>|</core><magnifier><width>0</width><initScale>4</initScale><useFilter>no</useFilter></magnifier>|" cfg/rc.xml && touch modifie.txt'
+expect-file modifie.txt 3000
+reconfigure
+move 420 280
+action <action name="ToggleMagnify"/>
+wait 300
+capture 05-plein-ecran.png
+action <action name="ToggleMagnify"/>
+wait 300
+capture 06-fermee.png
+quit

@@ -95,6 +95,8 @@ pub enum Action {
     },
     MoveToCursor,
     ToggleKeybinds,
+    /// Loupe (§ 7.2, priorité 3)
+    Zoom(crate::magnifier::ZoomAction),
     FocusOutput(OutputTarget),
     MoveToOutput(OutputTarget),
     /// Actions selon l'état de la vue: `then` si une requête correspond
@@ -374,6 +376,9 @@ pub fn parse(node: roxmltree::Node) -> Result<Action, String> {
         },
         "movetocursor" => MoveToCursor,
         "togglekeybinds" => ToggleKeybinds,
+        "zoomin" => Zoom(crate::magnifier::ZoomAction::In),
+        "zoomout" => Zoom(crate::magnifier::ZoomAction::Out),
+        "togglemagnify" => Zoom(crate::magnifier::ZoomAction::Toggle),
         "focusoutput" | "movetooutput" => {
             let target = match (a.get("output"), a.get("direction")) {
                 (Some(o), _) => OutputTarget::Name(o.to_string()),

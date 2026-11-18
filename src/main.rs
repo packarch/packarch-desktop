@@ -19,6 +19,7 @@ mod env;
 mod handlers;
 mod icons;
 mod input;
+mod magnifier;
 mod menu;
 mod osd;
 mod protocols;

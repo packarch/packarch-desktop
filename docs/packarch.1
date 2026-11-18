@@ -213,6 +213,18 @@ et des actions exécutées à l'apparition de la fenêtre.
 .B menu
 .BR showIcons .
 .TP
+.B magnifier
+Loupe :
+.BR width ", " height
+(px, 400 par défaut ; 0 : tout l'écran),
+.B initScale
+(2),
+.B increment
+(0,5),
+.B useFilter
+(yes : agrandissement lissé ; no : pixels nets). Bordure du thème :
+.BR magnifier.border.width ", " magnifier.border.color .
+.TP
 .B animations
 Attributs
 .BR enabled " et " speed
@@ -248,7 +260,8 @@ Bureaux et écrans
 .TP
 Divers
 .BR Execute " (command), " ShowMenu " (menu, atCursor), " NextWindow ", "
-.BR PreviousWindow ", " ToggleKeybinds ", " Reconfigure ", " Exit ", " None .
+.BR PreviousWindow ", " ToggleKeybinds ", " Reconfigure ", " Exit ", " None ,
+.BR ZoomIn ", " ZoomOut ", " ToggleMagnify " (loupe)."
 .TP
 Conditions
 .BR If " et " ForEach

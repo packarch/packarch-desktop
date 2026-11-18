@@ -25,10 +25,11 @@ arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 - Session réelle (DRM/KMS, libseat, libinput, plusieurs écrans) ;
   verrouillage, inactivité, barre des tâches et bureaux de waybar, capture,
   wlr-randr, wlopm, presse-papiers des outils, portails.
+- Loupe (`ZoomIn`, `ZoomOut`, `ToggleMagnify`) : rectangle qui suit le
+  pointeur ou tout l'écran.
 
-Pas encore : loupe (`ZoomIn`/`ZoomOut`, priorité 3), XWayland lancé à la
-première connexion X11 (impossible avec Smithay 0.7, voir le cahier des
-charges, § 15).
+Pas encore : XWayland lancé à la première connexion X11 (impossible avec
+Smithay 0.7, voir le cahier des charges, § 15).
 
 ## Essayer
 

@@ -23,7 +23,7 @@ use smithay::backend::renderer::gles::{
     GlesPixelProgram, GlesRenderer, GlesTarget, GlesTexProgram, GlesTexture, Uniform, UniformName,
     UniformType,
 };
-use smithay::backend::renderer::{Bind, Offscreen as _, Renderer};
+use smithay::backend::renderer::{Bind, Offscreen as _, Renderer, TextureFilter};
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::render_elements;
@@ -54,6 +54,7 @@ render_elements! {
     Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
     Anim=RelocateRenderElement<RescaleRenderElement<Base>>,
     Crop=CropRenderElement<Base>,
+    Texture=TextureRenderElement<GlesTexture>,
 }
 
 /// Distance signée à un rectangle aux coins arrondis (rayon du haut et du
@@ -427,8 +428,160 @@ impl From<Base> for Elem {
     }
 }
 
-/// Éléments d'un écran, du premier plan vers l'arrière-plan
+/// Texture où un écran est rendu avant d'être agrandi par la loupe
+pub struct MagnifierTexture {
+    texture: GlesTexture,
+    size: Size<i32, Physical>,
+    damage: OutputDamageTracker,
+}
+
+/// Éléments d'un écran, du premier plan vers l'arrière-plan, avec la loupe
+/// devant s'il le faut
 pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Output) -> Vec<Elem> {
+    let scene = scene_elements(state, renderer, output);
+    // Pixels nets dans la loupe si demandé (s'applique à tout l'écran pendant
+    // qu'elle est ouverte)
+    let filter = if state.magnifier.is_some() && !state.config.magnifier.use_filter {
+        TextureFilter::Nearest
+    } else {
+        TextureFilter::Linear
+    };
+    let _ = renderer.upscale_filter(filter);
+    match magnifier_elements(state, renderer, output, &scene) {
+        Ok(Some(mut front)) => {
+            front.extend(scene);
+            front
+        }
+        Ok(None) => scene,
+        Err(e) => {
+            warn!("loupe: {e}");
+            scene
+        }
+    }
+}
+
+/// Loupe sur l'écran sous le pointeur: l'image de l'écran est rendue dans
+/// une texture, dont une partie est dessinée agrandie, avec une bordure
+fn magnifier_elements(
+    state: &mut State,
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    scene: &[Elem],
+) -> anyhow::Result<Option<Vec<Elem>>> {
+    let Some(zoom) = state.magnifier else {
+        state.magnifier_textures.clear();
+        return Ok(None);
+    };
+    let geo = state.output_geometry(output);
+    if !geo.to_f64().contains(state.pointer) || state.output_off(output) {
+        return Ok(None);
+    }
+    let scale = output.current_scale().fractional_scale();
+    let size = geo.size.to_f64().to_physical(scale).to_i32_round::<i32>();
+    if size.w <= 0 || size.h <= 0 {
+        return Ok(None);
+    }
+    state
+        .magnifier_textures
+        .retain(|(o, t)| o != output || t.size == size);
+    if !state.magnifier_textures.iter().any(|(o, _)| o == output) {
+        let texture: GlesTexture = renderer.create_buffer(
+            Fourcc::Abgr8888,
+            size.to_logical(1).to_buffer(1, Transform::Normal),
+        )?;
+        let damage = OutputDamageTracker::new(size, scale, Transform::Normal);
+        state.magnifier_textures.push((
+            output.clone(),
+            MagnifierTexture {
+                texture,
+                size,
+                damage,
+            },
+        ));
+    }
+    let tex = &mut state
+        .magnifier_textures
+        .iter_mut()
+        .find(|(o, _)| o == output)
+        .expect("texture de la loupe")
+        .1;
+    {
+        let mut target: GlesTarget = renderer.bind(&mut tex.texture)?;
+        tex.damage
+            .render_output(renderer, &mut target, 0, scene, CLEAR.premultiplied())?;
+    }
+    let texture = tex.texture.clone();
+    let cfg = &state.config.magnifier;
+    let p = state.pointer - geo.loc.to_f64();
+    let (dst, src) = crate::magnifier::magnifier_rects(geo.size, p, cfg, zoom);
+    // Partie de la source sur l'écran; la loupe garde sa taille, le reste
+    // est rempli de la couleur de fond
+    let screen = Rectangle::from_size(geo.size.to_f64());
+    let mut out = vec![];
+    let Some(shaders) = state.shaders.as_ref() else {
+        return Ok(None);
+    };
+    let frame = dst.to_i32_round::<i32>();
+    let bw = state.theme.magnifier_border_width;
+    if bw > 0 && frame.size != geo.size {
+        out.push(Elem::Pixel(pixel(
+            &shaders.frame,
+            Rectangle::new(
+                frame.loc - Point::from((bw, bw)),
+                frame.size + Size::from((2 * bw, 2 * bw)),
+            ),
+            1.0,
+            vec![
+                Uniform::new("border_color", state.theme.magnifier_border_color.premultiplied()),
+                Uniform::new("title_color", [0.0f32; 4]),
+                Uniform::new("radius_top", 0.0f32),
+                Uniform::new("radius_bottom", 0.0f32),
+                Uniform::new("border", bw as f32),
+                Uniform::new("title_height", 0.0f32),
+                Uniform::new("px", px(scale)),
+            ],
+        )));
+    }
+    if let Some(visible) = src.intersection(screen) {
+        let shown = Rectangle::new(
+            dst.loc + (visible.loc - src.loc).upscale(zoom),
+            visible.size.upscale(zoom),
+        );
+        // Texture à l'échelle 1: la source est en pixels physiques
+        let src_px = Rectangle::new(visible.loc.upscale(scale), visible.size.upscale(scale));
+        out.push(Elem::Texture(TextureRenderElement::from_static_texture(
+            Id::new(),
+            renderer.context_id(),
+            shown.loc.to_physical(scale),
+            texture,
+            1,
+            Transform::Normal,
+            None,
+            Some(src_px),
+            Some(shown.size.to_i32_round()),
+            None,
+            Kind::Unspecified,
+        )));
+    }
+    out.push(Elem::Pixel(pixel(
+        &shaders.frame,
+        frame,
+        1.0,
+        vec![
+            Uniform::new("border_color", CLEAR.premultiplied()),
+            Uniform::new("title_color", CLEAR.premultiplied()),
+            Uniform::new("radius_top", 0.0f32),
+            Uniform::new("radius_bottom", 0.0f32),
+            Uniform::new("border", frame.size.w.max(frame.size.h) as f32),
+            Uniform::new("title_height", 0.0f32),
+            Uniform::new("px", px(scale)),
+        ],
+    )));
+    Ok(Some(out))
+}
+
+/// Éléments de la scène d'un écran, du premier plan vers l'arrière-plan
+fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Output) -> Vec<Elem> {
     let scale = output.current_scale().fractional_scale();
     let output_loc = state.output_location(output);
     let mut elements: Vec<Elem> = vec![];

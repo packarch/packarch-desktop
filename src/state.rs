@@ -128,6 +128,10 @@ pub struct State {
     pub us_keymap: Option<smithay::input::keyboard::xkb::Keymap>,
     /// Aperçu du collage pendant un déplacement (§ 8.6)
     pub snap_preview: Option<Rectangle<i32, Logical>>,
+    /// Facteur de la loupe, si elle est ouverte
+    pub magnifier: Option<f64>,
+    /// Texture où l'écran est rendu pour la loupe, par écran
+    pub magnifier_textures: Vec<(smithay::output::Output, crate::render::MagnifierTexture)>,
     /// Contour d'un redimensionnement sans dessin du contenu (§ 8.7)
     pub resize_outline: Option<Rectangle<i32, Logical>>,
     /// Aperçu affiché et son animation
@@ -321,6 +325,8 @@ impl State {
             suppressed_keys: vec![],
             us_keymap: us_keymap(),
             snap_preview: None,
+            magnifier: None,
+            magnifier_textures: vec![],
             snap_shown: None,
             resize_outline: None,
             scroll_acc: (0.0, 0.0),

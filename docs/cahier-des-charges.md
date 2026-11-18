@@ -213,6 +213,7 @@ marqués **P**, ils sont prioritaires) :
 | `libinput` | `device category=` (default, touchpad, non-touch…) : `tap`, `naturalScroll`, `middleEmulation`, `disableWhileTyping`, `accelProfile`, `pointerSpeed`, `leftHanded`, `scrollMethod` **P** pour les quatre premiers |
 | `windowRules` | `windowRule` (§ 8.5) **P** |
 | `animations` | `enabled`, `speed`, et par animation `duration` (ms), `curve` (§ 10.5) |
+| `magnifier` | `width`, `height` (px ; 0 : tout l'écran), `initScale`, `increment`, `useFilter` (loupe, § 15) |
 
 ### 5.3 Raccourcis clavier
 
@@ -353,6 +354,9 @@ effet ou être ignorées sans erreur. Groupes :
   `menu.shadow.size` (px), `menu.shadow.color` (`#rrggbbaa`).
   Ajouts : `osd.corner.radius`, `osd.shadow.size`, `osd.shadow.color` (par
   défaut : valeurs des menus).
+- **Loupe** : `magnifier.border.width` (1 px par défaut, 0 : sans
+  bordure), `magnifier.border.color` (par défaut : bordure de la fenêtre
+  active).
 
 ### 6.4 Polices
 
@@ -404,7 +408,8 @@ vue active (clavier, menu).
 `ResizeTo` (largeur, hauteur), `MoveToCursor`, `ToggleKeybinds`,
 `FocusOutput`, `MoveToOutput`, `ToggleShowDesktop`, `If` / `ForEach`
 (conditions sur le titre, l'identifiant, l'état), `None` (désactive un
-raccourci par défaut), `ZoomIn`/`ZoomOut` (loupe, priorité 3).
+raccourci par défaut), `ZoomIn`/`ZoomOut`/`ToggleMagnify` (loupe,
+priorité 3, § 15).
 
 ---
 
@@ -785,5 +790,14 @@ Décidé le 17 novembre 2026 :
     Une vue maximisée (haut) puis gauche va dans le quart en haut à gauche.
     Une vue libre, maximisée par l'action `Maximize` ou au centre prend le
     bord demandé.
+15. Loupe : `ZoomIn` l'ouvre à `initScale` (2 par défaut) puis grossit de
+    `increment` (0,5), jusqu'à 16 ; `ZoomOut` réduit d'autant et la ferme
+    en arrivant à 1 ; `ToggleMagnify` l'ouvre ou la ferme. Rectangle de
+    `width` × `height` px (400 × 400) centré sur le pointeur, sur l'écran
+    où il se trouve, avec une bordure du thème ; 0 pour l'une des tailles :
+    tout l'écran. Le point sous le pointeur reste sous le pointeur, si bien
+    que les clics vont à ce qu'on voit agrandi. Image de l'écran rendue
+    dans une texture puis agrandie (lissée, ou pixels nets avec
+    `useFilter=no`) ; le curseur n'est pas agrandi.
 
 Aucune question ouverte pour l'instant.

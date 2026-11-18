@@ -872,6 +872,7 @@ impl State {
                     }
                 );
             }
+            Zoom(z) => self.zoom(*z),
             FocusOutput(target) => self.focus_output(target, i),
             If {
                 queries,

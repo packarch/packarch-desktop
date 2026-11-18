@@ -219,6 +219,9 @@ pub struct Theme {
     pub masks: HashMap<Button, (Mask, Mask)>,
     pub menu: MenuTheme,
     pub osd: OsdTheme,
+    /// Bordure de la loupe
+    pub magnifier_border_width: i32,
+    pub magnifier_border_color: Color,
 }
 
 /// Apparence des OSD: liste Alt+Tab, nom du bureau (§ 6.3)
@@ -479,6 +482,7 @@ impl Theme {
         let active = colors(rc, "active", Color::rgba(0.0, 0.0, 0.0, 0.6));
         let menu = menu_theme(rc, border_width, &active);
         let osd = osd_theme(rc, &menu);
+        let magnifier_border_color = rc.color("magnifier.border.color").unwrap_or(active.border);
         Theme {
             name: name.to_string(),
             border_width,
@@ -488,6 +492,8 @@ impl Theme {
             active,
             inactive: colors(rc, "inactive", Color::rgba(0.0, 0.0, 0.0, 0.4)),
             masks,
+            magnifier_border_width: rc.int("magnifier.border.width").unwrap_or(1).max(0),
+            magnifier_border_color,
             menu,
             osd,
         }
