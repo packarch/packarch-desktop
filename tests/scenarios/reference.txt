@@ -71,4 +71,12 @@ wait 300
 action <action name="ToggleMaximize"/>
 wait 300
 expect un 100 0 504 382
+# Loupe à cheval sur le bord de la fenêtre: bordure de surbrillance visible
+move 604 300
+action <action name="ZoomIn"/>
+wait 300
+capture 7-loupe.png
+compare 7-loupe.png ref/7-loupe.png
+action <action name="ToggleMagnify"/>
+wait 200
 quit

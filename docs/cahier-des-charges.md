@@ -355,8 +355,9 @@ effet ou être ignorées sans erreur. Groupes :
   Ajouts : `osd.corner.radius`, `osd.shadow.size`, `osd.shadow.color` (par
   défaut : valeurs des menus).
 - **Loupe** : `magnifier.border.width` (1 px par défaut, 0 : sans
-  bordure), `magnifier.border.color` (par défaut : bordure de la fenêtre
-  active).
+  bordure), `magnifier.border.color` (par défaut : `menu.items.active.bg.color`,
+  la couleur de surbrillance ; celle de la bordure des fenêtres se
+  confondait avec leur fond dans 8 thèmes Packarch sur 10).
 
 ### 6.4 Polices
 

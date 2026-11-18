@@ -482,7 +482,10 @@ impl Theme {
         let active = colors(rc, "active", Color::rgba(0.0, 0.0, 0.0, 0.6));
         let menu = menu_theme(rc, border_width, &active);
         let osd = osd_theme(rc, &menu);
-        let magnifier_border_color = rc.color("magnifier.border.color").unwrap_or(active.border);
+        // Bordure de la loupe: couleur de surbrillance (entrée active des
+        // menus), visible sur les fenêtres; celle des fenêtres se confond
+        // avec leur fond dans la plupart des thèmes sombres
+        let magnifier_border_color = rc.color("magnifier.border.color").unwrap_or(menu.active_bg);
         Theme {
             name: name.to_string(),
             border_width,
