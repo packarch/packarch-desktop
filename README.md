@@ -6,7 +6,7 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : **version 1.1.1** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+État : **version 1.1.2** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
 § 14, et la page de manuel [docs/packarch.1](docs/packarch.1) :
 `man -l docs/packarch.1`).
 
