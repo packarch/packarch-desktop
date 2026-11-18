@@ -1,4 +1,4 @@
-# packarch-rwdesktop
+# packarch-desktop
 
 Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 `packarch`, configuration dans `~/.config/packarch/`), écrit en Rust sur
@@ -6,7 +6,7 @@ Compositeur Wayland à fenêtres flottantes pour Packarch (programme
 arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
 `menu.xml`, `themerc`), animations sobres.
 
-État : **version 1.1.6** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
+État : **version 1.2.0** (voir [docs/cahier-des-charges.md](docs/cahier-des-charges.md),
 § 14, et la page de manuel [docs/packarch.1](docs/packarch.1) :
 `man -l docs/packarch.1`).
 
@@ -35,10 +35,10 @@ Smithay 0.7, voir le cahier des charges, § 15).
 
 ```sh
 cargo build
-# Dans une fenêtre de la session en cours, avec la config de labwc :
-./target/debug/packarch -C ~/.config/labwc -s waybar -s kitty
+# Dans une fenêtre de la session en cours :
+./target/debug/packarch -C ~/.config/packarch -s waybar -s kitty
 # Sur une console libre (Ctrl+Alt+F3), en session complète :
-./target/debug/packarch -C ~/.config/labwc
+./target/debug/packarch -C ~/.config/packarch
 # Sans écran, scénarios d'essai (tests/scenarios), captures dans target/captures :
 tests/capture.sh
 # Captures comparées aux images de référence (tests/references) :

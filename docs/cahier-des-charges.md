@@ -1,9 +1,9 @@
-# Cahier des charges de packarch-rwdesktop
+# Cahier des charges de packarch-desktop
 
 Version 0.2, 17 novembre 2026. Document de travail, sous MIT ou Apache-2.0
 au choix, comme le code.
 
-packarch-rwdesktop (paquet `packarch-rwdesktop`, programme `packarch`) est
+packarch-desktop (paquet `packarch-desktop`, programme `packarch`) est
 un compositeur Wayland à fenêtres flottantes (« stacking »), écrit en Rust sur la boîte à outils Smithay. Il vise le bureau
 de Packarch : fenêtres décorées par le compositeur avec coins arrondis et
 ombres, menus du bureau arrondis et ombrés, thèmes Openbox, configuration au
@@ -178,7 +178,7 @@ src/
   lit que ses propres fichiers (liste ci-dessous) et ses propres
   sous-dossiers (`themes/`, `scripts/`…), et ne touche jamais aux autres.
 - `-C, --config-dir DOSSIER` choisit un autre dossier. Il permet d'essayer le
-  compositeur sur une copie de `~/.config/labwc`.
+  compositeur sur une copie de `~/.config/packarch`.
 - Fichiers lus : `rc.xml`, `menu.xml`, `environment`, `autostart`,
   `shutdown`, `themerc-override`.
 
@@ -658,12 +658,13 @@ partant de l'état affiché.
 
 ---
 
-## 11. Intégration à Packarch (plus tard)
+## 11. Intégration à Packarch
 
-Aucun paquet de Packarch n'est modifié tant que le compositeur n'a pas
-atteint la version 0.5 (§ 14). Prévu ensuite :
+Faite à partir de la version 0.5 (§ 14). Depuis la version 1.2, packarch
+est le seul bureau Wayland de Packarch : labwc est retiré de l'ISO et du
+dépôt.
 
-- Paquet `packarch-rwdesktop` (programme `/usr/bin/packarch`, fichier de
+- Paquet `packarch-desktop` (anciennement `packarch-rwdesktop`, programme `/usr/bin/packarch`, fichier de
   session `/usr/share/wayland-sessions/packarch.desktop`, portails,
   configuration par défaut dans `/etc/xdg/packarch/`).
 - `XDG_CURRENT_DESKTOP=packarch:wlroots`. La partie `wlroots`
@@ -672,9 +673,10 @@ atteint la version 0.5 (§ 14). Prévu ensuite :
 - packarch-skin : nouvelle cible qui écrit dans
   `~/.config/packarch/` (mêmes fichiers qu'aujourd'hui) et lance
   `packarch --reconfigure`.
-- packarch-labwc-settings : soit adapté, soit doublé par
-  `packarch-rwdesktop-settings` (mêmes scripts, menus et barres).
-- Calamares et packarch-depannage : choix du bureau.
+- `packarch-desktop-settings` (anciennement `packarch-rwdesktop-settings`)
+  remplace packarch-labwc-settings (mêmes scripts, menus et barres) :
+  les systèmes labwc passent à packarch à la mise à jour.
+- Calamares et packarch-depannage : packarch à la place de labwc.
 
 ---
 
@@ -732,6 +734,7 @@ packarch [OPTIONS]
 | **0.5 XWayland** | X11Wm, règles de fenêtres, collage et régions, portails | Steam, LibreOffice et un jeu X11 utilisables ; début de l'intégration (§ 11) |
 | **1.0** | Priorité 2 des actions, finitions, documentation `man` | Bureau par défaut de Packarch |
 | **1.1** | `xwaylandSharp`, quarts d'écran (`combine`), loupe, images de référence (§ 13) | Rendu protégé par les scénarios de référence |
+| **1.2** | Paquet `packarch-desktop`, labwc retiré de Packarch (§ 11) | Seul bureau Wayland de l'ISO |
 
 ---
 
@@ -739,7 +742,8 @@ packarch [OPTIONS]
 
 Décidé le 17 novembre 2026 :
 
-1. Programme `packarch` (paquet `packarch-rwdesktop`).
+1. Programme `packarch` (paquet `packarch-desktop`, nommé
+   `packarch-rwdesktop` jusqu'à la version 1.1.6).
 2. Dossier de configuration propre : `~/.config/packarch/`.
 3. Animations prévues (§ 10.5), dès la version 0.3.
 

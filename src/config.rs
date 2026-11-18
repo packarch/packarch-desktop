@@ -1136,7 +1136,7 @@ mod tests {
     #[test]
     fn packarch_rc() {
         // Le rc.xml installé par Packarch, s'il est présent: aucun avertissement
-        let path = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/labwc/rc.xml"));
+        let path = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/packarch/rc.xml"));
         if let Some(xml) = path.and_then(|p| std::fs::read_to_string(p).ok()) {
             let mut c = Config::default();
             c.parse(&xml).unwrap();

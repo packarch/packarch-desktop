@@ -4,7 +4,7 @@
 # Lance des scénarios d'essai sans écran et écrit leurs captures (§ 13).
 #   tests/capture.sh [--update] [SCÉNARIO…]   (par défaut: tous ceux de tests/scenarios)
 # Dossier des captures: target/captures/NOM. Configuration: le rc.xml de
-# ~/.config/packarch, sinon celui de labwc, résistance des bords désactivée;
+# ~/.config/packarch, résistance des bords désactivée;
 # autostart d'essai: fond uni (swaybg) et barre du thème (waybar, écran
 # HEADLESS-1). Code de sortie non nul si une vérification échoue.
 # Une ligne « #! OPTIONS » du scénario ajoute des options au programme
@@ -24,7 +24,6 @@ if [[ ${1:-} == --update ]]; then
 fi
 (($#)) || set -- "$root"/tests/scenarios/*.txt
 src="$HOME/.config/packarch"
-[[ -f $src/rc.xml ]] || src="$HOME/.config/labwc"
 cargo build --quiet --manifest-path "$root/Cargo.toml"
 cargo build --quiet --manifest-path "$root/Cargo.toml" --example client-essai
 status=0

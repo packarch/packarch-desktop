@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn packarch_menu() {
         // Le menu.xml de Packarch, s'il est présent: aucun avertissement
-        let dir = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config/labwc"));
+        let dir = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config/packarch"));
         if let Some(xml) = dir.and_then(|d| std::fs::read_to_string(d.join("menu.xml")).ok()) {
             let mut m = Menus::default();
             let mut w = vec![];
