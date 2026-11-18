@@ -554,12 +554,31 @@ impl State {
         self.views[i].tiling = Tiling::None;
         match self.views[i].saved.take() {
             Some(saved) => {
-                self.views[i].loc = saved.loc;
+                self.views[i].loc = self.reachable_loc(i, saved);
                 self.configure(i, Some(saved.size));
             }
             None => self.configure(i, None),
         }
         self.start_geom_anim(i, from);
+    }
+
+    /// Place d'une vue libre de géométrie `saved` (client) telle que sa
+    /// barre de titre reste attrapable: sous le haut de la zone utile (sous
+    /// la barre), au-dessus de son bas, et visible sur 50 px au moins en
+    /// largeur
+    fn reachable_loc(&self, i: usize, saved: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+        let zone = self.view_zone(i);
+        let layout = self.layout(&self.views[i]);
+        let off = layout.client.loc;
+        let frame_w = saved.size.w + layout.size.w - layout.client.size.w;
+        let title_h = off.y.max(1);
+        let (x, y) = (saved.loc.x - off.x, saved.loc.y - off.y);
+        let keep = 50.min(frame_w);
+        let x = x
+            .min(zone.loc.x + zone.size.w - keep)
+            .max(zone.loc.x + keep - frame_w);
+        let y = y.min(zone.loc.y + zone.size.h - title_h).max(zone.loc.y);
+        Point::from((x, y)) + off
     }
 
     pub fn maximize(&mut self, i: usize, axis: Axis) {

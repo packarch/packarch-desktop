@@ -61,4 +61,14 @@ click left
 wait 300
 expect-moved un 0 0
 expect-grown un 0 0
+# Rendue d'une place hors d'atteinte (titre au-dessus de l'écran): le titre
+# revient dans la zone utile
+action <action name="MoveTo" x="100" y="-200"/>
+wait 200
+expect un 100 -200 504 382
+action <action name="SnapToEdge" direction="up"/>
+wait 300
+action <action name="ToggleMaximize"/>
+wait 300
+expect un 100 0 504 382
 quit
