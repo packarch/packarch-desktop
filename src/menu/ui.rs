@@ -280,8 +280,13 @@ impl State {
     /// Affiche un menu de la réserve: le menu racine à `at`, ou un
     /// sous-menu de l'entrée `parent` du dernier niveau
     fn open_level(&mut self, id: &str, parent: Option<usize>, at: Point<i32, Logical>) {
+        // Sous-menu: l'écran est celui du menu parent, pas celui de `at`
+        let anchor = match (parent, self.menu.as_ref().and_then(|ms| ms.levels.last())) {
+            (Some(_), Some(p)) => p.rect().loc + Point::from((p.layout.size.w / 2, 0)),
+            _ => at,
+        };
         let screen = self
-            .output_at(at.to_f64())
+            .output_at(anchor.to_f64())
             .map(|o| self.output_geometry(&o))
             .unwrap_or_else(|| Rectangle::from_size((1, 1).into()));
         let now = self.now();
