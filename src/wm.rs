@@ -1389,6 +1389,7 @@ impl State {
         }
         self.apply_session_env();
         self.apply_keyboard();
+        self.update_xwayland_scale();
         // Les vues imposées suivent les nouvelles marges et le nouveau cadre
         for i in 0..self.views.len() {
             match self.views[i].tiling.clone() {

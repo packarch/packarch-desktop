@@ -387,6 +387,7 @@ impl State {
             layer_map_for_output(&o).arrange();
         }
         self.rescue_views();
+        self.update_xwayland_scale();
         for crtc in crtcs {
             self.udev_render(crtc);
         }

@@ -940,11 +940,17 @@ impl ResizeGrab {
     /// pour un client X11 qui donne un pas de redimensionnement
     fn size_text(&self, data: &State, size: Size<i32, Logical>) -> Option<String> {
         use crate::config::PopupShow;
+        // Les pas sont en pixels du client X (échelle de XWayland)
         let hints = self.window.x11_surface().and_then(|x| x.size_hints());
+        let s = data.xwayland.scale;
+        let client = Size::<i32, Logical>::from((
+            (size.w as f64 * s).round() as i32,
+            (size.h as f64 * s).round() as i32,
+        ));
         let steps = hints.and_then(|h| {
             let (iw, ih) = h.size_increment.filter(|(a, b)| *a > 1 || *b > 1)?;
             let (bw, bh) = h.base_size.or(h.min_size).unwrap_or((0, 0));
-            Some(((size.w - bw) / iw.max(1), (size.h - bh) / ih.max(1)))
+            Some(((client.w - bw) / iw.max(1), (client.h - bh) / ih.max(1)))
         });
         match (data.config.resize_popup, steps) {
             (PopupShow::Never, _) | (PopupShow::Nonpixel, None) => None,

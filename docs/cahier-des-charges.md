@@ -197,7 +197,7 @@ marqués **P**, ils sont prioritaires) :
 
 | Section | Réglages |
 |---|---|
-| `core` | `decoration` (server/client) **P**, `gap` **P**, `xwaylandPersistence` **P**, `adaptiveSync`, `reuseOutputMode` |
+| `core` | `decoration` (server/client) **P**, `gap` **P**, `xwaylandPersistence` **P**, `xwaylandSharp`, `adaptiveSync`, `reuseOutputMode` |
 | `placement` | `policy` (automatic, cursor, center) **P** |
 | `theme` | `name` **P**, `icon` **P**, `titlebar/layout` **P**, `titlebar/showTitle` **P**, `cornerRadius` **P**, `keepBorder` **P**, `dropShadows` **P**, `dropShadowsOnTiled` **P**, `font place=` (ActiveWindow, InactiveWindow, MenuHeader, MenuItem, OnScreenDisplay ; `name`, `size`, `weight`, `slant`) **P** |
 | `margin` | `top`, `bottom`, `left`, `right` **P** |
@@ -534,8 +534,9 @@ fichiers) ; le compositeur fournit les protocoles qu'ils demandent
   focus, empilement, fenêtres « override-redirect » (menus X11) sans cadre,
   `_NET_WM_STATE` (plein écran, maximisé), `WM_TRANSIENT_FOR`, icônes
   `_NET_WM_ICON`, classes pour les règles.
-- Mise à l'échelle : les clients X11 sont rendus à l'échelle 1 puis agrandis
-  (flou acceptable), réglage futur pour les laisser nets.
+- Mise à l'échelle : par défaut, les clients X11 sont rendus à l'échelle 1
+  puis agrandis (flou acceptable). Avec `<core><xwaylandSharp>yes`, ils
+  sont rendus à la plus grande échelle des écrans et restent nets (§ 15).
 
 ---
 
@@ -762,5 +763,18 @@ Décidé le 17 novembre 2026 :
     redimensionnement (les clients Wayland n'en donnent pas).
 11. Le protocole xdg-toplevel-icon n'est pas proposé : avec Smithay 0.7,
     il empêche certaines applications Qt de s'afficher.
+
+12. XWayland à la première connexion X11 : pas possible avec Smithay 0.7.
+    `XWayland::spawn` lance le serveur tout de suite, et le gestionnaire
+    X11 de Smithay exige les données de client `XWaylandClientData`, que
+    seul `spawn` sait créer. À reprendre quand Smithay le permettra.
+13. `xwaylandSharp` (propre à Packarch, `no` par défaut) : XWayland reçoit
+    une échelle client égale à la plus grande échelle des écrans ; les
+    clients X voient les écrans en pixels réels. Le DPI leur est donné par
+    XSettings (`Xft/DPI`, `Gdk/WindowScalingFactor` entier,
+    `Gdk/UnscaledDPI`, `Xcursor/size`) et par `Xft.dpi` (xrdb, s'il est
+    installé). Appliqué à chaud (écrans, rechargement). Les applications X
+    qui ne lisent pas le DPI paraissent plus petites : d'où `no` par
+    défaut.
 
 Aucune question ouverte pour l'instant.

@@ -1,0 +1,29 @@
+# Clients X11 nets à l'échelle 1,5 (<core><xwaylandSharp>, § 9.4): écran
+# 1920×1200 de 1280×800 unités. Lancé par tests/capture.sh.
+#! --size 1920x1200 --scale 1.5
+wait 3000
+spawn env KITTY_DISABLE_WAYLAND=1 kitty --config NONE -o confirm_os_window_close=0 -o remember_window_size=no -o initial_window_width=600 -o initial_window_height=350 -T x11 -e sh -c 'echo Bonjour, texte net ou flou ? 0123456789; sleep 120'
+wait-views 1 10000
+wait 1500
+# Sans l'option: XWayland voit l'écran en unités logiques, kitty est agrandi
+spawn sh -c 'xrandr 2>/dev/null | grep -q "current 1280 x 800" && touch agrandi.txt'
+expect-file agrandi.txt 3000
+capture 01-agrandi.png
+mark x11
+# Avec l'option, à chaud: écran en pixels réels, Xft.dpi 144, même taille
+spawn sh -c 'sed -i "s|<core>|<core><xwaylandSharp>yes</xwaylandSharp>|" cfg/rc.xml && touch modifie.txt'
+expect-file modifie.txt 3000
+reconfigure
+wait 1500
+spawn sh -c 'xrandr 2>/dev/null | grep -q "current 1920 x 1200" && xrdb -query | grep -q "Xft.dpi:.144" && touch net.txt'
+expect-file net.txt 3000
+expect-moved x11 0 0
+capture 02-net.png
+# Maximisée: toute la zone utile, en unités logiques
+action <action name="Maximize"/>
+wait 600
+expect x11 0 38 1280 724
+spawn sh -c 'xdotool search --name x11 getwindowgeometry | awk "/Geometry/ { split(\$2, t, \"x\"); exit !(t[1] > 1800) }" && touch max.txt'
+expect-file max.txt 3000
+capture 03-maximisee.png
+quit

@@ -186,6 +186,8 @@ pub struct Config {
     pub server_decoration: bool,
     pub gap: i32,
     pub xwayland_persistence: bool,
+    /// Clients X11 rendus à l'échelle de l'écran (nets) au lieu d'être agrandis
+    pub xwayland_sharp: bool,
     pub placement: Placement,
     // theme
     pub theme_name: String,
@@ -277,6 +279,7 @@ impl Default for Config {
             server_decoration: true,
             gap: 0,
             xwayland_persistence: false,
+            xwayland_sharp: false,
             placement: Placement::Automatic,
             theme_name: String::new(),
             icon_theme: String::new(),
@@ -661,6 +664,7 @@ impl Config {
                 },
                 "gap" => r.int(c, &mut self.gap),
                 "xwaylandpersistence" => r.bool(c, &mut self.xwayland_persistence),
+                "xwaylandsharp" => r.bool(c, &mut self.xwayland_sharp),
                 "adaptivesync" | "reuseoutputmode" | "allowtearing" => {}
                 _ => r.unknown(c, "core"),
             }
@@ -1053,6 +1057,7 @@ mod tests {
         let mut c = Config::default();
         c.parse(
             r#"<packarch_config>
+            <core><xwaylandSharp>yes</xwaylandSharp></core>
             <desktops><popupTime>300</popupTime><names><name>Un</name><name>Deux</name></names></desktops>
             <regions><region name="gauche" x="0%" y="0%" width="50%" height="100%"/></regions>
             <snapping><range inner="5" outer="15"/><topMaximize>no</topMaximize></snapping>
@@ -1061,6 +1066,7 @@ mod tests {
         )
         .unwrap();
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+        assert!(c.xwayland_sharp);
         assert_eq!(c.desktop_names, vec!["Un", "Deux"]);
         assert_eq!(c.desktop_popup_ms, 300);
         assert_eq!(c.region("gauche").unwrap().width, 50.0);

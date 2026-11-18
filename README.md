@@ -25,7 +25,8 @@ arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
   wlr-randr, wlopm, presse-papiers des outils, portails.
 
 Pas encore : loupe (`ZoomIn`/`ZoomOut`, priorité 3), quarts d'écran
-(`SnapToEdge combine="yes"`), XWayland lancé à la première connexion X11.
+(`SnapToEdge combine="yes"`), XWayland lancé à la première connexion X11
+(impossible avec Smithay 0.7, voir le cahier des charges, § 15).
 
 ## Essayer
 

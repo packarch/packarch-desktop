@@ -4,6 +4,12 @@
 //! comme les autres (cadre, focus, empilement, `_NET_WM_STATE`); les
 //! fenêtres « override-redirect » (menus, bulles X11) sont dessinées sans
 //! cadre devant les vues. Presse-papiers partagé avec Wayland.
+//!
+//! Échelle: par défaut les clients X11 sont dessinés à l'échelle 1 puis
+//! agrandis (flous). Avec `<core><xwaylandSharp>`, XWayland reçoit une
+//! échelle client égale à la plus grande échelle des écrans: les clients X
+//! voient des écrans en pixels réels et sont rendus nets; le DPI leur est
+//! donné par XSettings (GTK) et `Xft.dpi` (Qt, xrdb).
 
 use std::os::fd::OwnedFd;
 use std::process::Stdio;
@@ -11,6 +17,7 @@ use std::process::Stdio;
 use smithay::desktop::Window;
 use smithay::desktop::utils::under_from_surface_tree;
 use smithay::input::Seat;
+use smithay::reexports::wayland_server::Client;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::selection::data_device::{
@@ -23,6 +30,7 @@ use smithay::wayland::selection::primary_selection::{
 };
 use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
+use smithay::xwayland::xwm::settings::Value;
 use smithay::xwayland::xwm::{Reorder, ResizeEdge, XwmId};
 use smithay::xwayland::{X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler};
 use smithay::{delegate_xwayland_shell, desktop::WindowSurfaceType};
@@ -37,6 +45,10 @@ use crate::wm::Origin;
 /// Données du serveur X
 pub struct Xwayland {
     pub wm: Option<X11Wm>,
+    /// Client Wayland de XWayland, qui porte l'échelle client
+    pub client: Option<Client>,
+    /// Échelle client appliquée (pixels X par unité logique)
+    pub scale: f64,
     pub display: Option<u32>,
     /// Fenêtres override-redirect affichées, de l'arrière vers l'avant
     pub unmanaged: Vec<X11Surface>,
@@ -70,7 +82,11 @@ impl State {
                             return;
                         }
                     }
+                    state.xwayland.client = Some(client.clone());
                     state.xwayland.display = Some(display_number);
+                    // Échelle de départ des clients: 1
+                    state.xwayland.scale = 1.0;
+                    state.update_xwayland_scale();
                     let var = format!(":{display_number}");
                     info!("XWayland prêt: DISPLAY={var}");
                     state.child_env.retain(|(k, _)| k != "DISPLAY");
@@ -85,6 +101,93 @@ impl State {
             });
         if let Err(e) = result {
             warn!("XWayland: {e}");
+        }
+    }
+
+    /// Échelle voulue pour les clients X11: 1 (agrandis par le compositeur)
+    /// ou la plus grande échelle des écrans (`xwaylandSharp`)
+    fn wanted_xwayland_scale(&self) -> f64 {
+        if !self.config.xwayland_sharp {
+            return 1.0;
+        }
+        self.outputs
+            .iter()
+            .map(|o| o.current_scale().fractional_scale())
+            .fold(1.0, f64::max)
+    }
+
+    /// Applique l'échelle client de XWayland si elle a changé: écrans
+    /// annoncés de nouveau, DPI, fenêtres X11 reconfigurées
+    pub fn update_xwayland_scale(&mut self) {
+        let scale = self.wanted_xwayland_scale();
+        if self.xwayland.wm.is_none() || scale == self.xwayland.scale {
+            return;
+        }
+        let Some(data) = self
+            .xwayland
+            .client
+            .as_ref()
+            .and_then(|c| c.get_data::<smithay::xwayland::XWaylandClientData>())
+        else {
+            return;
+        };
+        data.compositor_state.set_client_scale(scale);
+        self.xwayland.scale = scale;
+        info!("XWayland: échelle des clients X11 {scale}");
+        // xdg-output renvoie position et taille en pixels X
+        for o in &self.outputs {
+            o.change_current_state(None, None, None, None);
+        }
+        // GTK: facteur entier, le reste par le DPI; curseurs à la même échelle
+        let dpi = (96.0 * scale * 1024.0).round() as i32;
+        let gdk = scale.floor().max(1.0);
+        let (_, cursor) = self.cursor_settings();
+        let settings = [
+            ("Xft/DPI", Value::Integer(dpi)),
+            ("Gdk/WindowScalingFactor", Value::Integer(gdk as i32)),
+            (
+                "Gdk/UnscaledDPI",
+                Value::Integer((96.0 * scale / gdk * 1024.0).round() as i32),
+            ),
+            (
+                "Xcursor/size",
+                Value::Integer((cursor as f64 * scale).round() as i32),
+            ),
+        ];
+        if let Some(wm) = self.xwayland.wm.as_mut()
+            && let Err(e) = wm.set_xsettings(settings.into_iter().map(|(k, v)| (k.to_string(), v)))
+        {
+            warn!("XSettings: {e}");
+        }
+        self.set_xft_dpi((96.0 * scale).round() as u32);
+        // Les fenêtres reçoivent leur taille en pixels X
+        for v in &self.views {
+            if let Some(x) = v.x11() {
+                let _ = x.configure(None);
+            }
+        }
+    }
+
+    /// `Xft.dpi` dans les ressources X (Qt, Xft), par xrdb s'il est installé
+    fn set_xft_dpi(&self, dpi: u32) {
+        use std::io::Write;
+        let Some(n) = self.xwayland.display else { return };
+        let child = std::process::Command::new("xrdb")
+            .args(["-nocpp", "-merge"])
+            .env("DISPLAY", format!(":{n}"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        match child {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = writeln!(stdin, "Xft.dpi: {dpi}");
+                }
+                // Attente dans un fil: le compositeur ne bloque pas
+                std::thread::spawn(move || child.wait());
+            }
+            Err(e) => tracing::debug!("xrdb: {e}"),
         }
     }
 
@@ -432,6 +535,7 @@ impl XwmHandler for State {
     fn disconnected(&mut self, _xwm: XwmId) {
         warn!("XWayland déconnecté");
         self.xwayland.wm = None;
+        self.xwayland.client = None;
         self.xwayland.unmanaged.clear();
     }
 }

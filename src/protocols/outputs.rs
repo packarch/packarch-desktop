@@ -283,6 +283,7 @@ impl State {
     /// clients, vues imposées et vues perdues
     pub fn output_changed(&mut self, output: &Output) {
         smithay::desktop::layer_map_for_output(output).arrange();
+        self.update_xwayland_scale();
         let scale = output.current_scale().fractional_scale();
         let mut surfaces: Vec<_> = self.views.iter().map(|v| v.surface().clone()).collect();
         surfaces.extend(

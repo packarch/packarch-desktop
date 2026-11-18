@@ -7,6 +7,8 @@
 # ~/.config/packarch, sinon celui de labwc, résistance des bords désactivée;
 # autostart d'essai: fond uni (swaybg) et barre du thème (waybar, écran
 # HEADLESS-1). Code de sortie non nul si une vérification échoue.
+# Une ligne « #! OPTIONS » du scénario ajoute des options au programme
+# (par exemple « #! --size 1920x1200 --scale 1.5 »).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 (($#)) || set -- "$root"/tests/scenarios/*.txt
@@ -35,7 +37,8 @@ for scenario in "$@"; do
 		fi
 	} >"$out/cfg/autostart"
 	echo "== $name"
-	if (cd "$out" && "$root/target/debug/packarch" --backend headless -C "$out/cfg" --script "$scenario" >"$out/journal.txt" 2>&1); then
+	read -ra opts <<<"$(sed -n 's/^#! //p' "$scenario")"
+	if (cd "$out" && "$root/target/debug/packarch" --backend headless -C "$out/cfg" "${opts[@]}" --script "$scenario" >"$out/journal.txt" 2>&1); then
 		echo "   réussi, captures dans $out"
 	else
 		status=1

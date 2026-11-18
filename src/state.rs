@@ -348,6 +348,8 @@ impl State {
             cursors: None,
             xwayland: crate::xwayland::Xwayland {
                 wm: None,
+                client: None,
+                scale: 1.0,
                 display: None,
                 unmanaged: vec![],
                 shell: xwayland_shell,
