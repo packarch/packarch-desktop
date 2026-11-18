@@ -167,6 +167,9 @@ pub struct State {
     pub idle_inhibitors: Vec<WlSurface>,
     /// Curseur demandé par le client sous le pointeur
     pub cursor_status: smithay::input::pointer::CursorImageStatus,
+    /// Point chaud du dernier curseur rendu (pixels, depuis son coin haut
+    /// gauche): plan curseur des pilotes virtuels (HOTSPOT_X/HOTSPOT_Y)
+    pub cursor_hotspot: Option<smithay::utils::Point<i32, smithay::utils::Physical>>,
     /// OSD affiché (Alt+Tab, nom du bureau) et celui qui disparaît
     pub osd: Option<crate::osd::Osd>,
     pub osd_ghost: Option<crate::osd::OsdGhost>,
@@ -352,6 +355,7 @@ impl State {
             lock_surfaces: vec![],
             idle_inhibitors: vec![],
             cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
+            cursor_hotspot: None,
             monotonic: smithay::utils::Clock::new(),
             osd: None,
             osd_ghost: None,

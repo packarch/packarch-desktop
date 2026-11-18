@@ -819,4 +819,13 @@ Décidé le 17 novembre 2026 :
     et donne le mode par défaut annoncé à GTK3 ; la règle de fenêtre
     `serverDecoration` impose ou retire le cadre.
 
+18. Curseur des machines virtuelles : depuis Linux 6.8, virtio-gpu, qxl et
+    vmwgfx cachent leur plan curseur aux compositeurs atomiques qui ne
+    s'engagent pas à donner le point chaud du curseur
+    (`DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT`, `HOTSPOT_X`/`HOTSPOT_Y`).
+    Smithay 0.7 ne le fait pas : le curseur était dessiné dans l'image et
+    SPICE affichait le sien par-dessus (deux curseurs). Copie modifiée de
+    Smithay 0.7.0 dans `vendor/smithay` (`[patch.crates-io]`, détail dans
+    `vendor/README.md`), à retirer quand Smithay le gérera.
+
 Aucune question ouverte pour l'instant.

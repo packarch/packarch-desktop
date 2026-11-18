@@ -1,6 +1,6 @@
 [package]
 name = "packarch-rwdesktop"
-version = "1.1.2"
+version = "1.1.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Compositeur Wayland à fenêtres flottantes de Packarch"
@@ -49,3 +49,9 @@ name = "client-essai"
 
 [profile.release]
 debug = "line-tables-only"
+
+# Smithay 0.7.0 avec le point chaud du plan curseur des pilotes virtuels
+# (virtio-gpu, qxl, vmwgfx : curseur double sous QEMU/SPICE), voir
+# vendor/README.md ; à retirer quand Smithay le gérera
+[patch.crates-io]
+smithay = { path = "vendor/smithay" }

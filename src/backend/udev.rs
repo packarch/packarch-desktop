@@ -465,6 +465,7 @@ impl State {
         let s = u.surfaces.get_mut(&crtc).unwrap();
         s.dirty = animating;
         let mut queued = false;
+        s.compositor.set_cursor_hotspot(self.cursor_hotspot);
         match s.compositor.render_frame(
             &mut u.renderer,
             &elements,

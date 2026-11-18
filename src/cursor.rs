@@ -144,6 +144,7 @@ impl State {
         let scale = output.current_scale().fractional_scale();
         let geo = self.output_geometry(output);
         let pos = self.pointer - geo.loc.to_f64();
+        self.cursor_hotspot = None;
         // Hors de cet écran (avec une marge pour les grands curseurs)
         if !Rectangle::new(Point::from((-64, -64)), geo.size + Size::from((128, 128)))
             .to_f64()
@@ -161,14 +162,9 @@ impl State {
                         .unwrap_or_default()
                 });
                 let loc: Point<f64, Logical> = pos - hotspot.to_f64();
-                render_elements_from_surface_tree(
-                    renderer,
-                    &surface,
-                    loc.to_physical(scale).to_i32_round(),
-                    scale,
-                    1.0,
-                    Kind::Cursor,
-                )
+                let loc = loc.to_physical(scale).to_i32_round();
+                self.cursor_hotspot = Some(pos.to_physical(scale).to_i32_round() - loc);
+                render_elements_from_surface_tree(renderer, &surface, loc, scale, 1.0, Kind::Cursor)
             }
             CursorImageStatus::Named(icon) => {
                 let (theme, size) = self.cursor_settings();
@@ -179,6 +175,7 @@ impl State {
                     return vec![];
                 };
                 let loc = pos.to_physical(scale) - img.hotspot.to_f64();
+                let hotspot = img.hotspot;
                 let logical = img.size.to_f64().to_logical(scale).to_i32_round();
                 match MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
@@ -189,7 +186,10 @@ impl State {
                     Some(logical),
                     Kind::Cursor,
                 ) {
-                    Ok(e) => vec![Elem::Memory(e)],
+                    Ok(e) => {
+                        self.cursor_hotspot = Some(hotspot);
+                        vec![Elem::Memory(e)]
+                    }
                     Err(e) => {
                         warn!("curseur: {e:?}");
                         vec![]
