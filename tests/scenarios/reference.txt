@@ -43,4 +43,22 @@ compare 5-alt-tab.png ref/5-alt-tab.png
 keyup 56
 wait 200
 expect-focus un
+# Glissée en haut de l'écran (collée en haut), le bouton de maximisation la
+# rend à sa géométrie libre
+mark un
+point un title
+press left
+move-by 0 -40
+move-by 0 -100
+move 640 0
+release left
+wait 300
+expect un 0 0 1280 800
+capture 6-collee-haut.png
+compare 6-collee-haut.png ref/6-collee-haut.png
+point un max
+click left
+wait 300
+expect-moved un 0 0
+expect-grown un 0 0
 quit

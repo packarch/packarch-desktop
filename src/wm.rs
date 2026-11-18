@@ -580,7 +580,7 @@ impl State {
     }
 
     pub fn toggle_maximize(&mut self, i: usize, axis: Axis) {
-        if matches!(self.views[i].tiling, Tiling::Maximized(a) if a == axis) {
+        if self.views[i].tiling.is_maximized_in(axis) {
             self.restore(i);
         } else {
             self.maximize(i, axis);
@@ -927,7 +927,9 @@ impl State {
             Iconify => self.iconify(i),
             Maximize(axis) => self.maximize(i, *axis),
             UnMaximize(axis) => {
-                if matches!(self.views[i].tiling, Tiling::Maximized(a) if a == *axis || *axis == Axis::Both) {
+                if *axis == Axis::Both && self.views[i].tiling.is_maximized()
+                    || self.views[i].tiling.is_maximized_in(*axis)
+                {
                     self.restore(i);
                 }
             }
@@ -1266,7 +1268,7 @@ impl State {
         let eq = |want: Option<bool>, got: bool| want.is_none_or(|w| w == got);
         q.identifier.as_deref().is_none_or(|p| wildcard(p, &v.app_id()))
             && q.title.as_deref().is_none_or(|p| wildcard(p, &v.title()))
-            && eq(q.maximized, matches!(v.tiling, Tiling::Maximized(_)))
+            && eq(q.maximized, v.tiling.is_maximized())
             && eq(q.iconified, v.minimized)
             && eq(q.focused, self.focused_view() == Some(i))
             && eq(q.omnipresent, v.omnipresent)

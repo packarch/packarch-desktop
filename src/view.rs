@@ -105,6 +105,31 @@ pub enum Tiling {
     Fullscreen,
 }
 
+impl Tiling {
+    /// Toute la zone utile: maximisée dans les deux sens, ou collée en haut
+    /// (glissée en haut de l'écran, topMaximize) ou au centre, qui ont la
+    /// même géométrie et que le client voit maximisées
+    pub fn fills_zone(&self) -> bool {
+        matches!(
+            self,
+            Tiling::Maximized(Axis::Both) | Tiling::Edge(Edge::Up | Edge::Center)
+        )
+    }
+
+    /// Maximisée, dans un sens au moins
+    pub fn is_maximized(&self) -> bool {
+        matches!(self, Tiling::Maximized(_)) || self.fills_zone()
+    }
+
+    /// Maximisée dans ce sens (`Both`: dans les deux)
+    pub fn is_maximized_in(&self, axis: Axis) -> bool {
+        match axis {
+            Axis::Both => self.fills_zone(),
+            a => *self == Tiling::Maximized(a),
+        }
+    }
+}
+
 /// Couche d'empilement (§ 8.1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Stack {
@@ -278,5 +303,31 @@ impl View {
 
     pub fn on_desktop(&self, desktop: usize) -> bool {
         self.omnipresent || self.desktop == desktop
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tiling_maximized() {
+        // Glissée en haut de l'écran: maximisée pour les boutons et le client
+        for t in [
+            Tiling::Maximized(Axis::Both),
+            Tiling::Edge(Edge::Up),
+            Tiling::Edge(Edge::Center),
+        ] {
+            assert!(
+                t.fills_zone() && t.is_maximized() && t.is_maximized_in(Axis::Both),
+                "{t:?}"
+            );
+        }
+        let h = Tiling::Maximized(Axis::Horizontal);
+        assert!(!h.fills_zone() && h.is_maximized());
+        assert!(h.is_maximized_in(Axis::Horizontal) && !h.is_maximized_in(Axis::Vertical));
+        for t in [Tiling::None, Tiling::Edge(Edge::Left), Tiling::Fullscreen] {
+            assert!(!t.is_maximized(), "{t:?}");
+        }
     }
 }

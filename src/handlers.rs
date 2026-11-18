@@ -541,7 +541,7 @@ impl XdgShellHandler for State {
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(i) = self.view_of(&surface)
-            && matches!(self.views[i].tiling, Tiling::Maximized(_))
+            && self.views[i].tiling.is_maximized()
         {
             self.restore(i);
         }

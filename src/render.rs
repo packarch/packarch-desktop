@@ -1271,7 +1271,7 @@ fn view_elements(
         layout: layout.clone(),
         title: view.title(),
         active,
-        maximized: view.tiling == crate::view::Tiling::Maximized(crate::view::Axis::Both),
+        maximized: view.tiling.fills_zone(),
         hovered: view.hovered,
         pressed: view.pressed,
         scale: scale.to_bits(),

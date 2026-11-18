@@ -1159,6 +1159,12 @@ impl PointerGrab<State> for MoveGrab {
                 && let Some(i) = data.window_index(&self.window)
             {
                 data.snap(i, snap);
+                // Géométrie libre: la place d'avant le glissement, pas celle
+                // du relâchement (titre hors de l'écran après un collage en
+                // haut, puis Maximiser pour la rendre)
+                if let Some(saved) = data.views[i].saved.as_mut() {
+                    saved.loc = self.initial_loc;
+                }
             }
         }
     }

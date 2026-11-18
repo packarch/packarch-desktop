@@ -455,7 +455,7 @@ impl XwmHandler for State {
 
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(i) = self.x11_view(&window)
-            && matches!(self.views[i].tiling, Tiling::Maximized(_))
+            && self.views[i].tiling.is_maximized()
         {
             self.restore(i);
         }

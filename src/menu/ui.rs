@@ -757,7 +757,7 @@ impl State {
             v.omnipresent,
             Action::ToggleOmnipresent,
         ));
-        let maximized = matches!(v.tiling, Tiling::Maximized(Axis::Both));
+        let maximized = v.tiling.fills_zone();
         let entries = vec![
             Entry::Menu(format!("{CLIENT}/desktops")),
             Entry::Separator(None),

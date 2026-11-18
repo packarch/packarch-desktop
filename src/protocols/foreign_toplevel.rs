@@ -89,7 +89,7 @@ impl State {
     fn toplevel_info(&self, i: usize) -> Info {
         let v = &self.views[i];
         let mut states = vec![];
-        if matches!(v.tiling, Tiling::Maximized(Axis::Both)) {
+        if v.tiling.fills_zone() {
             states.push(zwlr_foreign_toplevel_handle_v1::State::Maximized as u32);
         }
         if v.minimized {
@@ -273,7 +273,7 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, u64> for State {
         let tiling = state.views[i].tiling.clone();
         match request {
             R::SetMaximized => state.maximize(i, Axis::Both),
-            R::UnsetMaximized if matches!(tiling, Tiling::Maximized(_)) => state.restore(i),
+            R::UnsetMaximized if tiling.is_maximized() => state.restore(i),
             R::SetMinimized => state.iconify(i),
             R::UnsetMinimized => {
                 state.focus_view(i, true);
