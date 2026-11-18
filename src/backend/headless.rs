@@ -17,7 +17,7 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Physical, Rectangle, Size, Transform};
 use tracing::{info, warn};
 
-use super::{Backend, after_render, init_renderer};
+use super::{Backend, after_render, init_renderer, presented_now};
 use crate::render::{CLEAR, output_elements};
 use crate::state::State;
 
@@ -125,7 +125,8 @@ fn render(state: &mut State) {
         Err(e) => warn!("headless: {e:?}"),
     }
     state.backend = Some(Backend::Headless(h));
-    after_render(state, &output);
+    let feedback = after_render(state, &output, None);
+    presented_now(state, &output, feedback);
 }
 
 fn write_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> anyhow::Result<()> {

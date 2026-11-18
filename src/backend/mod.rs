@@ -13,9 +13,20 @@ use std::time::Duration;
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::desktop::layer_map_for_output;
+use smithay::backend::renderer::element::{RenderElementStates, default_primary_scanout_output_compare};
+use smithay::desktop::utils::{
+    OutputPresentationFeedback, send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
+    surface_primary_scanout_output, take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
+    with_surfaces_surface_tree,
+};
 use smithay::desktop::space::SpaceElement;
+use smithay::desktop::{PopupManager, layer_map_for_output};
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::wayland::compositor::SurfaceData;
+use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::presentation::Refresh;
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufState};
 use tracing::{info, warn};
 
@@ -63,66 +74,103 @@ pub fn init_renderer(state: &mut State, renderer: &mut GlesRenderer) {
     state.dmabuf = Some((dmabuf_state, global));
 }
 
-/// Après un rendu: rappels de trame, retours de présentation, barres des
-/// tâches et bureaux, ménage
-pub fn after_render(state: &mut State, output: &Output) {
+/// Après un rendu: écran principal de chaque surface, rappels de trame,
+/// barres des tâches et bureaux, ménage. Rend les retours de présentation
+/// des surfaces dont c'est l'écran principal, à signaler quand l'image est
+/// vraiment affichée.
+///
+/// `states` (ce que le rendu a dessiné) fixe l'écran principal de chaque
+/// surface : une surface ne reçoit ses rappels de trame et ses retours de
+/// présentation qu'au rythme de cet écran. Sinon, avec deux écrans non
+/// synchronisés, un client recevrait deux rappels par période et XWayland
+/// croirait l'écran à 120 Hz (vidéo saccadée). Les surfaces invisibles
+/// reçoivent un rappel par seconde. Sans `states` (winit, headless : un seul
+/// écran), toutes les surfaces sont sur cet écran.
+pub fn after_render(
+    state: &mut State,
+    output: &Output,
+    states: Option<&RenderElementStates>,
+) -> OutputPresentationFeedback {
     let time = state.start.elapsed();
     state.confirm_lock();
-    let mut feedback = smithay::desktop::utils::OutputPresentationFeedback::new(output);
-    for view in &state.views {
-        if view.mapped {
-            view.window.take_presentation_feedback(
-                &mut feedback,
-                |_, _| Some(output.clone()),
-                |_, _| smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind::empty(),
-            );
+    let surfaces = all_surfaces(state);
+    if let Some(states) = states {
+        for s in &surfaces {
+            with_surfaces_surface_tree(s, |surface, data| {
+                update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    data,
+                    states,
+                    default_primary_scanout_output_compare,
+                );
+            });
         }
     }
-    let refresh = output
-        .current_mode()
-        .map(|m| {
-            smithay::wayland::presentation::Refresh::fixed(Duration::from_secs_f64(
-                1000.0 / m.refresh.max(1) as f64,
-            ))
-        })
-        .unwrap_or(smithay::wayland::presentation::Refresh::Unknown);
-    feedback.presented(
-        state.monotonic.now(),
-        refresh,
-        0,
-        smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind::Vsync,
-    );
+    let primary = |surface: &WlSurface, data: &SurfaceData| match states {
+        Some(_) => surface_primary_scanout_output(surface, data),
+        None => Some(output.clone()),
+    };
+    let mut feedback = OutputPresentationFeedback::new(output);
+    for s in &surfaces {
+        take_presentation_feedback_surface_tree(s, &mut feedback, primary, |surface, _| match states {
+            Some(states) => surface_presentation_feedback_flags_from_states(surface, states),
+            None => Kind::empty(),
+        });
+    }
     state.refresh_toplevels();
     state.refresh_workspaces();
     state.refresh_output_tools();
     let throttle = Some(Duration::from_secs(1));
-    for view in &state.views {
-        if view.mapped {
-            view.window
-                .send_frame(output, time, throttle, |_, _| Some(output.clone()));
-        }
-    }
-    {
-        let map = layer_map_for_output(output);
-        for layer in map.layers() {
-            layer.send_frame(output, time, throttle, |_, _| Some(output.clone()));
-        }
+    for s in &surfaces {
+        send_frames_surface_tree(s, output, time, throttle, primary);
     }
     layer_map_for_output(output).cleanup();
     for view in &state.views {
         view.window.refresh();
     }
     state.sync_x11_positions();
-    for (s, _) in state.unmanaged_surfaces() {
-        smithay::desktop::utils::send_frames_surface_tree(&s, output, time, throttle, |_, _| {
-            Some(output.clone())
-        });
-    }
-    for (_, l) in &state.lock_surfaces {
-        smithay::desktop::utils::send_frames_surface_tree(l.wl_surface(), output, time, throttle, |_, _| {
-            Some(output.clone())
-        });
-    }
     state.popups.cleanup();
     let _ = state.dh.flush_clients();
+    feedback
+}
+
+/// Retour de présentation immédiat (winit, headless : pas de vblank connu)
+pub fn presented_now(state: &State, output: &Output, mut feedback: OutputPresentationFeedback) {
+    feedback.presented(state.monotonic.now(), refresh_of(output), 0, Kind::Vsync);
+}
+
+/// Période de rafraîchissement d'un écran
+pub fn refresh_of(output: &Output) -> Refresh {
+    output
+        .current_mode()
+        .map(|m| Refresh::fixed(Duration::from_secs_f64(1000.0 / m.refresh.max(1) as f64)))
+        .unwrap_or(Refresh::Unknown)
+}
+
+/// Racines de toutes les surfaces affichables : vues (avec leurs menus
+/// surgissants), couches de tous les écrans, fenêtres X11 hors gestion,
+/// écrans de verrouillage
+fn all_surfaces(state: &State) -> Vec<WlSurface> {
+    let mut out = Vec::new();
+    for view in state.views.iter().filter(|v| v.mapped) {
+        if let Some(s) = view.window.wl_surface() {
+            let s = s.into_owned();
+            for (popup, _) in PopupManager::popups_for_surface(&s) {
+                out.push(popup.wl_surface().clone());
+            }
+            out.push(s);
+        }
+    }
+    for o in &state.outputs {
+        for layer in layer_map_for_output(o).layers() {
+            out.push(layer.wl_surface().clone());
+            for (popup, _) in PopupManager::popups_for_surface(layer.wl_surface()) {
+                out.push(popup.wl_surface().clone());
+            }
+        }
+    }
+    out.extend(state.unmanaged_surfaces().into_iter().map(|(s, _)| s));
+    out.extend(state.lock_surfaces.iter().map(|(_, l)| l.wl_surface().clone()));
+    out
 }

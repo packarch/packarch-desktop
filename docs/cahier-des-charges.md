@@ -745,6 +745,7 @@ packarch [OPTIONS]
 | **1.0** | Priorité 2 des actions, finitions, documentation `man` | Bureau par défaut de Packarch |
 | **1.1** | `xwaylandSharp`, quarts d'écran (`combine`), loupe, images de référence (§ 13) | Rendu protégé par les scénarios de référence |
 | **1.2** | Paquet `packarch-desktop`, labwc retiré de Packarch (§ 11) | Seul bureau Wayland de l'ISO |
+| **1.3** | Synchronisation explicite, fréquence variable, rythme des clients par écran (décisions 22 à 24) | Vidéo fluide sur deux écrans, XWayland compris |
 
 ---
 
@@ -864,5 +865,16 @@ Décidé le 17 novembre 2026 :
     seulement quand une vue en plein écran est visible sur l'écran. Un écran
     qui ne la change qu'avec un changement de mode ne la reçoit qu'avec
     `yes` (une fois) : sinon il clignoterait à chaque plein écran.
+24. Rythme des clients (version 1.3.1) : chaque surface a un écran
+    principal, celui où elle est le plus visible d'après le dernier rendu
+    (Smithay, `update_surface_primary_scanout_output`). Ses rappels de
+    trame et ses retours de présentation ne suivent que cet écran ; une
+    surface invisible reçoit un rappel par seconde. Les retours de
+    présentation sont envoyés au vblank, avec l'heure et le numéro de
+    séquence du pilote (`HwClock`, `HwCompletion`), et abandonnés pour une
+    image sans changement. Avant, chaque rendu de chaque écran les envoyait
+    à toutes les surfaces, à l'heure du rendu : sur deux écrans à 60 Hz,
+    XWayland voyait 120 Hz et les vidéos des lecteurs X11 (Nounours
+    Player) saccadaient.
 
 Aucune question ouverte pour l'instant.

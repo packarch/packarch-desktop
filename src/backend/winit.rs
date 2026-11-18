@@ -10,7 +10,7 @@ use smithay::reexports::calloop::EventLoop;
 use smithay::utils::Transform;
 use tracing::warn;
 
-use super::{Backend, after_render, init_renderer};
+use super::{Backend, after_render, init_renderer, presented_now};
 use crate::render::{CLEAR, output_elements};
 use crate::state::State;
 
@@ -115,5 +115,6 @@ fn render(state: &mut State) {
     }
     w.backend.window().request_redraw();
     state.backend = Some(Backend::Winit(w));
-    after_render(state, &output);
+    let feedback = after_render(state, &output, None);
+    presented_now(state, &output, feedback);
 }

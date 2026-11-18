@@ -12,7 +12,8 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
-use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, VrrSupport};
+use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport};
+use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
 use smithay::backend::egl::{EGLContext, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
@@ -21,6 +22,7 @@ use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{UdevBackend, UdevEvent, primary_gpu};
 use smithay::desktop::layer_map_for_output;
+use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, RegistrationToken};
@@ -28,15 +30,15 @@ use smithay::reexports::drm::control::{Device as ControlDevice, ModeTypeFlags, c
 use smithay::reexports::input::{self as libinput, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_server::backend::GlobalId;
-use smithay::utils::{DeviceFd, Transform};
+use smithay::utils::{DeviceFd, Time, Transform};
 use tracing::{debug, info, warn};
 
-use super::{Backend, after_render, init_renderer};
+use super::{Backend, after_render, init_renderer, refresh_of};
 use crate::render::{CLEAR, output_elements};
 use crate::state::State;
 
 type Compositor =
-    DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, (), DrmDeviceFd>;
+    DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, Option<OutputPresentationFeedback>, DrmDeviceFd>;
 
 /// Un écran branché
 struct Surface {
@@ -199,8 +201,8 @@ pub fn init(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> an
     // Images affichées: l'écran suivant est dessiné au vblank
     let drm_token = event_loop
         .handle()
-        .insert_source(drm_notifier, |event, _, state| match event {
-            DrmEvent::VBlank(crtc) => state.udev_vblank(crtc),
+        .insert_source(drm_notifier, |event, meta, state| match event {
+            DrmEvent::VBlank(crtc) => state.udev_vblank(crtc, meta.as_ref()),
             DrmEvent::Error(e) => warn!("DRM: {e}"),
         })
         .map_err(|e| anyhow::anyhow!("DRM: {e}"))?;
@@ -482,13 +484,31 @@ impl State {
         }
     }
 
-    fn udev_vblank(&mut self, crtc: crtc::Handle) {
+    /// Image affichée : retours de présentation à l'heure et au numéro du
+    /// vblank (XWayland en tire le rythme de ses clients), puis écran suivant
+    fn udev_vblank(&mut self, crtc: crtc::Handle, meta: Option<&DrmEventMetadata>) {
+        let now = self.monotonic.now();
         let Some(u) = self.udev() else { return };
         let Some(s) = u.surfaces.get_mut(&crtc) else {
             return;
         };
-        if let Err(e) = s.compositor.frame_submitted() {
-            warn!("vblank: {e:?}");
+        match s.compositor.frame_submitted() {
+            Ok(Some(Some(mut feedback))) => {
+                let (time, seq, hw) = match meta {
+                    Some(DrmEventMetadata { time: DrmEventTime::Monotonic(t), sequence }) if !t.is_zero() => {
+                        (Time::from(*t), *sequence as u64, true)
+                    }
+                    _ => (now, 0, false),
+                };
+                let flags = if hw {
+                    Kind::Vsync | Kind::HwClock | Kind::HwCompletion
+                } else {
+                    Kind::Vsync
+                };
+                feedback.presented(time, refresh_of(&s.output), seq, flags);
+            }
+            Ok(_) => {}
+            Err(e) => warn!("vblank: {e:?}"),
         }
         s.queued = false;
         if s.dirty {
@@ -556,15 +576,29 @@ impl State {
         let s = u.surfaces.get_mut(&crtc).unwrap();
         s.dirty = animating;
         set_vrr(s, want_vrr);
-        let mut queued = false;
         s.compositor.set_cursor_hotspot(self.cursor_hotspot);
-        match s.compositor.render_frame(
+        // Image dessinée (états des éléments pour l'écran principal de
+        // chaque surface), envoyée au vblank suivant avec ses retours de
+        // présentation
+        let (changed, states) = match s.compositor.render_frame(
             &mut u.renderer,
             &elements,
             CLEAR.premultiplied(),
             FrameFlags::DEFAULT,
         ) {
-            Ok(frame) if !frame.is_empty => match s.compositor.queue_frame(()) {
+            Ok(frame) => (!frame.is_empty, Some(frame.states)),
+            Err(e) => {
+                warn!("{}: rendu: {e:?}", output.name());
+                (false, None)
+            }
+        };
+        self.backend = Some(Backend::Udev(u));
+        let feedback = after_render(self, &output, states.as_ref());
+        let mut queued = false;
+        if changed
+            && let Some(s) = self.udev().and_then(|u| u.surfaces.get_mut(&crtc))
+        {
+            match s.compositor.queue_frame(Some(feedback)) {
                 Ok(()) => queued = true,
                 // Changement de console: l'accès à l'écran est retiré juste
                 // avant la pause de la session
@@ -572,13 +606,9 @@ impl State {
                     debug!("{}: écran inaccessible (changement de console)", output.name())
                 }
                 Err(e) => warn!("{}: {e:?}", output.name()),
-            },
-            Ok(_) => {}
-            Err(e) => warn!("{}: rendu: {e:?}", output.name()),
+            }
+            s.queued = queued;
         }
-        s.queued = queued;
-        self.backend = Some(Backend::Udev(u));
-        after_render(self, &output);
         if !queued && animating {
             // Animation sans changement visible cette fois: image suivante
             let refresh = output
