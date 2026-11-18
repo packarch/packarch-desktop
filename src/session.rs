@@ -116,11 +116,12 @@ impl State {
         if let Err(e) = keyboard.set_xkb_config(self, cfg) {
             warn!("disposition du clavier {:?}: {e:?}", x.layout);
         } else {
-            info!(
-                "clavier: {} {}",
-                if x.layout.is_empty() { "us" } else { &x.layout },
-                x.variant
-            );
+            let layout = if x.layout.is_empty() { "us" } else { &x.layout };
+            if x.variant.is_empty() {
+                info!("clavier: {layout}");
+            } else {
+                info!("clavier: {layout} {}", x.variant);
+            }
         }
         keyboard.change_repeat_info(self.config.repeat_rate, self.config.repeat_delay);
         if let Some(on) = self.config.numlock {

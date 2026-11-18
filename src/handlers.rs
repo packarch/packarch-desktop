@@ -231,11 +231,12 @@ impl State {
         }
         let i = self.focus_view(i, true);
         self.appear(i, crate::render::Appear::Open);
-        info!(
-            "fenêtre: « {} » ({})",
-            self.views[i].title(),
-            self.views[i].app_id()
-        );
+        let app_id = self.views[i].app_id();
+        if app_id.is_empty() {
+            info!("fenêtre: « {} »", self.views[i].title());
+        } else {
+            info!("fenêtre: « {} » ({app_id})", self.views[i].title());
+        }
         self.apply_rules(i);
     }
 
