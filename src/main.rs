@@ -174,7 +174,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         script::run(&event_loop.handle(), steps);
     }
 
-    let result = event_loop.run(None, &mut state, |_| {});
+    // Événements envoyés aux clients à chaque tour de boucle : retours de
+    // présentation du vblank, libérations de tampons, rappels de trame.
+    // Sinon ils attendaient le rendu suivant ou la requête suivante du client
+    let result = event_loop.run(None, &mut state, |state| {
+        let _ = state.dh.flush_clients();
+    });
     state.end_session();
     result?;
     if script::FAILED.load(std::sync::atomic::Ordering::Relaxed) {

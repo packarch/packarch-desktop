@@ -860,6 +860,10 @@ Décidé le 17 novembre 2026 :
     récent). Le commit d'un tampon dmabuf est retenu jusqu'au point
     d'acquisition du client ; sans synchronisation explicite, jusqu'à la
     barrière implicite du dmabuf. Le rendu n'attend jamais un client lent.
+    Version 1.3.3 : le déblocage d'un commit demande un rendu (avant,
+    l'image attendait la requête suivante du client : vidéo saccadée dans
+    tous les lecteurs), et les événements sont envoyés aux clients à chaque
+    tour de boucle (retours de présentation au vblank, pas au rendu suivant).
 23. Fréquence variable (`<core><adaptiveSync>`, version 1.3) : `no` par
     défaut, `yes` sur tous les écrans qui la permettent, `fullscreen`
     seulement quand une vue en plein écran est visible sur l'écran. Un écran

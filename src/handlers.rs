@@ -132,9 +132,13 @@ fn add_commit_blockers(surface: &WlSurface) {
         });
         let Some(dmabuf) = dmabuf else { return };
         let Some(client) = surface.client() else { return };
+        // Commit appliqué : l'image a changé. Sans demande de rendu, la
+        // nouvelle image attendait la requête suivante du client (vidéo
+        // saccadée : une image sur deux affichée avec une période de retard)
         let release = move |state: &mut State| {
             let dh = state.dh.clone();
             state.client_compositor_state(&client).blocker_cleared(state, &dh);
+            state.request_redraw();
         };
         if let Some(point) = acquire {
             // Point déjà signalé (ou erreur): le commit passe tout de suite.
