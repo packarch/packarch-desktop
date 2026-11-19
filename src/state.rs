@@ -177,6 +177,9 @@ pub struct State {
     /// Point chaud du dernier curseur rendu (pixels, depuis son coin haut
     /// gauche): plan curseur des pilotes virtuels (HOTSPOT_X/HOTSPOT_Y)
     pub cursor_hotspot: Option<smithay::utils::Point<i32, smithay::utils::Physical>>,
+    /// Icône d'un glisser-déposer en cours (wl_data_device.start_drag),
+    /// dessinée sous le pointeur, et son décalage cumulé (wl_surface.offset)
+    pub dnd_icon: Option<(WlSurface, smithay::utils::Point<i32, smithay::utils::Logical>)>,
     /// OSD affiché (Alt+Tab, nom du bureau) et celui qui disparaît
     pub osd: Option<crate::osd::Osd>,
     pub osd_ghost: Option<crate::osd::OsdGhost>,
@@ -369,6 +372,7 @@ impl State {
             idle_inhibitors: vec![],
             cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
             cursor_hotspot: None,
+            dnd_icon: None,
             monotonic: smithay::utils::Clock::new(),
             osd: None,
             osd_ghost: None,

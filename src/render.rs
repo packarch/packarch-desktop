@@ -471,17 +471,14 @@ pub fn output_elements(state: &mut State, renderer: &mut GlesRenderer, output: &
         TextureFilter::Linear
     };
     let _ = renderer.upscale_filter(filter);
+    let mut out = state.dnd_icon_elements(renderer, output);
     match magnifier_elements(state, renderer, output, &scene) {
-        Ok(Some(mut front)) => {
-            front.extend(scene);
-            front
-        }
-        Ok(None) => scene,
-        Err(e) => {
-            warn!("loupe: {e}");
-            scene
-        }
+        Ok(Some(front)) => out.extend(front),
+        Ok(None) => {}
+        Err(e) => warn!("loupe: {e}"),
     }
+    out.extend(scene);
+    out
 }
 
 /// Loupe sur l'écran sous le pointeur: l'image de l'écran est rendue dans

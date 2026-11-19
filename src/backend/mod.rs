@@ -218,5 +218,7 @@ fn all_surfaces(state: &State) -> Vec<WlSurface> {
     }
     out.extend(state.unmanaged_surfaces().into_iter().map(|(s, _)| s));
     out.extend(state.lock_surfaces.iter().map(|(_, l)| l.wl_surface().clone()));
+    // Icône du glisser-déposer : rappels de frame pour qu'elle s'anime
+    out.extend(state.dnd_icon.as_ref().map(|(s, _)| s.clone()));
     out
 }

@@ -12,6 +12,7 @@ use smithay::backend::renderer::element::surface::render_elements_from_surface_t
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::input::pointer::{CursorImageStatus, CursorImageSurfaceData};
 use smithay::output::Output;
+use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use tracing::warn;
@@ -137,6 +138,23 @@ impl State {
         let theme = get("XCURSOR_THEME").unwrap_or_else(|| "default".into());
         let size = get("XCURSOR_SIZE").and_then(|s| s.parse().ok()).unwrap_or(24);
         (theme, size)
+    }
+
+    /// Icône du glisser-déposer en cours, sous le pointeur (devant la scène,
+    /// derrière le curseur). Elle fait partie de l'image capturée, même
+    /// sans le curseur.
+    pub fn dnd_icon_elements(&self, renderer: &mut GlesRenderer, output: &Output) -> Vec<Elem> {
+        let Some((surface, offset)) = &self.dnd_icon else {
+            return vec![];
+        };
+        if !surface.is_alive() {
+            return vec![];
+        }
+        let scale = output.current_scale().fractional_scale();
+        let geo = self.output_geometry(output);
+        let loc = self.pointer - geo.loc.to_f64() + offset.to_f64();
+        let loc = loc.to_physical(scale).to_i32_round();
+        render_elements_from_surface_tree(renderer, surface, loc, scale, 1.0, Kind::Unspecified)
     }
 
     /// Éléments du curseur sur un écran (devant tout le reste)

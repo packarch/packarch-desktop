@@ -14,7 +14,9 @@ use smithay::output::Output;
 use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecoMode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
-use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_output, wl_seat, wl_surface::WlSurface};
+use smithay::reexports::wayland_server::protocol::{
+    wl_buffer, wl_data_source::WlDataSource, wl_output, wl_seat, wl_surface::WlSurface,
+};
 use smithay::reexports::wayland_server::{Client, Resource};
 use smithay::utils::Transform;
 use smithay::utils::{Point, Serial};
@@ -96,6 +98,21 @@ impl CompositorHandler for State {
             }
             if let Some(i) = self.view_index(&root) {
                 self.views[i].window.on_commit();
+            }
+        }
+        // Icône du glisser-déposer : le client la déplace par wl_surface.offset
+        if let Some((icon, offset)) = self.dnd_icon.as_mut()
+            && icon == surface
+        {
+            let delta = with_states(surface, |s| {
+                s.cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .buffer_delta
+                    .take()
+            });
+            if let Some(d) = delta {
+                *offset += d;
             }
         }
         self.commit_toplevel(surface);
@@ -434,7 +451,15 @@ impl DataDeviceHandler for State {
     }
 }
 
-impl ClientDndGrabHandler for State {}
+impl ClientDndGrabHandler for State {
+    fn started(&mut self, _source: Option<WlDataSource>, icon: Option<WlSurface>, _seat: Seat<Self>) {
+        self.dnd_icon = icon.map(|s| (s, Point::from((0, 0))));
+    }
+
+    fn dropped(&mut self, _target: Option<WlSurface>, _validated: bool, _seat: Seat<Self>) {
+        self.dnd_icon = None;
+    }
+}
 impl ServerDndGrabHandler for State {}
 
 impl PrimarySelectionHandler for State {
