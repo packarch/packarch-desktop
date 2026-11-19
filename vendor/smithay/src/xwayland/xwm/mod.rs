@@ -2234,17 +2234,32 @@ where
                                     .iter_mut()
                                     .find(|t| t.request.requestor == requestor)
                                 {
-                                    match read_selection_callback(&xwm.conn, &xwm.atoms, fd.as_fd(), transfer)
-                                    {
+                                    let done = match read_selection_callback(
+                                        &xwm.conn,
+                                        &xwm.atoms,
+                                        fd.as_fd(),
+                                        transfer,
+                                    ) {
                                         Ok(OutgoingAction::WaitForReadable) => {
                                             return Ok(PostAction::Continue);
                                         } // transfer ongoing
-                                        Ok(_) => {}
+                                        Ok(OutgoingAction::Done) => true,
+                                        Ok(_) => false,
                                         Err(err) => {
                                             warn!(?err, "Transfer aborted");
+                                            false
                                         }
                                     };
                                     let _ = transfer.token.take();
+                                    // packarch: the requestor got its answer; a
+                                    // transfer left in the list would be taken
+                                    // for stale at its next request and answered
+                                    // again with a failure, read by the requestor
+                                    // as the answer to that new request (Java
+                                    // reads the drag data several times)
+                                    if done {
+                                        selection.outgoing.retain(|t| t.request.requestor != requestor);
+                                    }
                                 }
 
                                 Ok(PostAction::Remove)

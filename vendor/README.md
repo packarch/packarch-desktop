@@ -21,7 +21,10 @@ Copie de [Smithay](https://github.com/Smithay/smithay) 0.7.0 (licence MIT,
 - `src/xwayland/xwm/dnd.rs` (nouveau) et `src/xwayland/xwm/mod.rs` :
   glisser-déposer XDND entre Wayland et X11 (décision 32 du cahier des
   charges). `XdndSelection` est une troisième sélection (`SelKind::Dnd`)
-  qui réutilise les transferts des presse-papiers ; méthodes
+  qui réutilise les transferts des presse-papiers (un transfert terminé
+  quitte la liste : laissé, il était pris pour périmé à la demande
+  suivante du même client et recevait une réponse d'échec, que Java lisait
+  comme celle de sa nouvelle demande) ; méthodes
   `X11Wm::dnd_*` et `X11Wm::x11_drag_*`, fenêtre mandataire, nouvelles
   méthodes de `XwmHandler` (par défaut sans effet).
 - `src/wayland/selection/data_device/dnd_grab.rs` et `mod.rs` :

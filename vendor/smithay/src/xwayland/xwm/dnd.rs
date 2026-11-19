@@ -470,6 +470,7 @@ where
                 action = DndAction::Copy;
             }
             let accepted = out.accepted;
+            debug!(window = out.target, accepted, ?action, "XDND: X window status");
             if let Some((x, y, a)) = out.pending.take().filter(|_| !out.dropped) {
                 xwm.dnd_send_position(x, y, a)?;
             }

@@ -988,5 +988,9 @@ Décidé le 17 novembre 2026 :
     gérées (icône du glisser qui suit le pointeur) sont ignorées pour
     trouver la surface Wayland visée. Vérifié sans écran : GTK 3 Wayland
     vers GTK 3 X11 et Swing (FileBot), GTK 3 X11 vers GTK 3 Wayland.
+    Java lit les données plusieurs fois au dépôt : un transfert terminé
+    quitte la liste des transferts du gestionnaire X11 (sinon la demande
+    suivante recevait un échec). Les applications winit 0.30 (eframe,
+    egui) ne reçoivent pas de fichiers en Wayland natif : à lancer en X11.
 
 Aucune question ouverte pour l'instant.
