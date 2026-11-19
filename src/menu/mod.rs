@@ -128,10 +128,10 @@ pub const CLIENT_LIST: &str = "client-list-combined-menu";
 pub const APPS: &str = "applications-menu";
 
 /// Terminaux essayés dans l'ordre, après `$TERMINAL`
-const TERMINALS: &str = "foot kitty alacritty konsole xfce4-terminal gnome-terminal xterm";
+const TERMINALS: &str = "ghostty foot kitty alacritty konsole xfce4-terminal gnome-terminal xterm";
 
 /// Commande qui ouvre `command` (ligne de commande du shell) dans le
-/// premier terminal installé: `$TERMINAL`, sinon foot, kitty…; vide: le
+/// premier terminal installé: `$TERMINAL`, sinon ghostty, foot, kitty…; vide: le
 /// terminal seul
 pub fn in_terminal(command: &str) -> String {
     if command.is_empty() {

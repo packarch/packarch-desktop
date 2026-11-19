@@ -286,7 +286,7 @@ const DEFAULT_KEYBOARD: &str = r#"<keyboard>
   <keybind key="A-Tab"><action name="NextWindow"/></keybind>
   <keybind key="A-S-Tab"><action name="PreviousWindow"/></keybind>
   <keybind key="A-F4"><action name="Close"/></keybind>
-  <keybind key="W-Return"><action name="Execute" command="kitty"/></keybind>
+  <keybind key="W-Return"><action name="Execute" command="@TERMINAL@"/></keybind>
 </keyboard>"#;
 
 impl Default for Config {
@@ -526,7 +526,14 @@ impl Config {
     }
 
     fn parse_defaults(&mut self) {
-        for xml in [DEFAULT_MOUSE, DEFAULT_KEYBOARD] {
+        // Terminal du raccourci: le premier installé (crate::menu::in_terminal)
+        let terminal = crate::menu::in_terminal("")
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        let keyboard = DEFAULT_KEYBOARD.replace("@TERMINAL@", &terminal);
+        for xml in [DEFAULT_MOUSE, keyboard.as_str()] {
             let doc = roxmltree::Document::parse(xml).unwrap();
             let mut warnings = vec![];
             let mut r = Reader {

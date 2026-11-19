@@ -27,7 +27,7 @@
     <menu id="applications-menu" />
     <menu id="client-list-combined-menu" />
     <item label="_Terminal" icon="utilities-terminal">
-      <action name="Execute" command="for t in &quot;$TERMINAL&quot; foot kitty alacritty wezterm konsole gnome-terminal xfce4-terminal xterm; do command -v &quot;$t&quot; &gt;/dev/null 2&gt;&amp;1 &amp;&amp; exec &quot;$t&quot;; done" />
+      <action name="Execute" command="for t in &quot;$TERMINAL&quot; ghostty foot kitty alacritty wezterm konsole gnome-terminal xfce4-terminal xterm; do command -v &quot;$t&quot; &gt;/dev/null 2&gt;&amp;1 &amp;&amp; exec &quot;$t&quot;; done" />
     </item>
     <separator />
     <item label="Re_charger" icon="view-refresh">

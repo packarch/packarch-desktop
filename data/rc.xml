@@ -5,7 +5,7 @@
     mkdir -p ~/.config/packarch
     cp /etc/xdg/packarch/* ~/.config/packarch/
   Elle ne suppose aucun autre programme : le terminal est le premier trouvé
-  parmi $TERMINAL, foot, kitty, alacritty… Voir `man packarch`.
+  parmi $TERMINAL, ghostty, foot, kitty… Voir `man packarch`.
   Recharger après une modification : Super+Maj+r.
 -->
 <packarch_config>
@@ -37,7 +37,7 @@
     <repeatDelay>600</repeatDelay>
     <!-- Terminal et menus -->
     <keybind key="W-Return">
-      <action name="Execute" command="for t in &quot;$TERMINAL&quot; foot kitty alacritty wezterm konsole gnome-terminal xfce4-terminal xterm; do command -v &quot;$t&quot; &gt;/dev/null 2&gt;&amp;1 &amp;&amp; exec &quot;$t&quot;; done" />
+      <action name="Execute" command="for t in &quot;$TERMINAL&quot; ghostty foot kitty alacritty wezterm konsole gnome-terminal xfce4-terminal xterm; do command -v &quot;$t&quot; &gt;/dev/null 2&gt;&amp;1 &amp;&amp; exec &quot;$t&quot;; done" />
     </keybind>
     <keybind key="W-space"><action name="ShowMenu" menu="root-menu" /></keybind>
     <keybind key="A-space">
