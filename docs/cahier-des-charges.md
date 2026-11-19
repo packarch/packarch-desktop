@@ -747,6 +747,7 @@ packarch [OPTIONS]
 | **1.1** | `xwaylandSharp`, quarts d'écran (`combine`), loupe, images de référence (§ 13) | Rendu protégé par les scénarios de référence |
 | **1.2** | Paquet `packarch-desktop`, labwc retiré de Packarch (§ 11) | Seul bureau Wayland de l'ISO |
 | **1.3** | Synchronisation explicite, fréquence variable, rythme des clients par écran (décisions 22 à 24) | Vidéo fluide sur deux écrans, XWayland compris |
+| **1.4** | Pointeur virtuel, capture dmabuf et par dégâts, ext-image-copy-capture (capture d'une fenêtre), journal des paniques, `tests/ci.sh`, tests sans GPU (décisions 25 à 29) | Partage d'une fenêtre par xdg-desktop-portal-wlr ; scénarios de référence conformes sur GPU et en rendu logiciel |
 
 ---
 
