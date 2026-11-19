@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 #
 # Lance des scénarios d'essai sans écran et écrit leurs captures (§ 13).
-#   tests/capture.sh [--update] [SCÉNARIO…]   (par défaut: tous ceux de tests/scenarios)
+#   tests/capture.sh [--logiciel] [--update] [SCÉNARIO…]
+#   (par défaut: tous ceux de tests/scenarios)
 # Dossier des captures: target/captures/NOM. Configuration: le rc.xml de
 # ~/.config/packarch, résistance des bords désactivée;
 # autostart d'essai: fond uni (swaybg) et barre du thème (waybar, écran
@@ -16,9 +17,20 @@
 # PATH), et
 # les étapes « compare X ref/X » comparent les captures aux images de
 # tests/references/NOM. --update remplace ces images par les captures.
+#
+# --logiciel : rendu par le processeur (Mesa llvmpipe), sans GPU ; les
+# comparaisons tolèrent alors 2 niveaux d'écart avec les références, faites
+# sur un GPU.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 update=0
+logiciel=()
+if [[ ${1:-} == --logiciel ]]; then
+	export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+	export LIBGL_ALWAYS_SOFTWARE=1
+	logiciel=(--tolerance 2)
+	shift
+fi
 if [[ ${1:-} == --update ]]; then
 	update=1
 	shift
@@ -42,6 +54,7 @@ for scenario in "$@"; do
 		: >"$out/cfg/autostart"
 		echo "== $name (références)"
 		read -ra opts <<<"$(sed -n 's/^#! //p' "$scenario")"
+		opts+=("${logiciel[@]}")
 		if (cd "$out" && XDG_DATA_HOME="$root/tests/essai/data" XKB_DEFAULT_LAYOUT=us \
 			PATH="$root/target/debug/examples:$PATH" \
 			"$root/target/debug/packarch" --backend headless -C "$out/cfg" "${opts[@]}" \

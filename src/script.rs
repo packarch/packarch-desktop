@@ -320,8 +320,9 @@ fn point(
     }
 }
 
-/// Exécute le scénario dans la boucle d'événements
-pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
+/// Exécute le scénario dans la boucle d'événements. `min_tolerance` : écart
+/// toléré au moins par chaque `compare` (rendu logiciel, § 13)
+pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>, min_tolerance: u8) {
     let mut steps = std::collections::VecDeque::from(steps);
     let mut waiting_since: Option<Instant> = None;
     let mut marks: Vec<(String, smithay::utils::Rectangle<i32, smithay::utils::Logical>)> = vec![];
@@ -595,7 +596,7 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                         return TimeoutAction::ToDuration(Duration::from_millis(50));
                     }
                     waiting_since = None;
-                    match compare(&got, &reference, tolerance) {
+                    match compare(&got, &reference, tolerance.max(min_tolerance)) {
                         Ok(()) => info!("script: {} conforme à la référence", got.display()),
                         Err(e) => fail(state, format!("{}: {e}", got.display())),
                     }

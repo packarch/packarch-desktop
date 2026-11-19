@@ -84,6 +84,9 @@ struct Cli {
     /// Désactive les animations
     #[arg(long)]
     no_animations: bool,
+    /// Écart toléré au moins par les comparaisons d'images du scénario
+    #[arg(long, hide = true, default_value_t = 0)]
+    tolerance: u8,
     /// Scénario d'essai (voir src/script.rs)
     #[arg(long, hide = true, value_name = "FICHIER")]
     script: Option<PathBuf>,
@@ -198,7 +201,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     if let Some(path) = &cli.script {
         let text = std::fs::read_to_string(path)?;
         let steps = script::parse(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
-        script::run(&event_loop.handle(), steps);
+        script::run(&event_loop.handle(), steps, cli.tolerance);
     }
 
     // Événements envoyés aux clients à chaque tour de boucle : retours de

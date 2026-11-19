@@ -158,8 +158,8 @@ src/
   reprise sans perdre l'affichage.
 - **winit** : le compositeur tourne dans une fenêtre d'une session
   existante, pour le développement.
-- **headless + pixman** : sans écran ni GPU, pour les tests automatiques et
-  les captures (§ 13).
+- **headless** : sans écran, pour les tests automatiques et les captures
+  (§ 13) ; sans GPU par le rendu logiciel de Mesa (décision 28).
 - Rendu : OpenGL ES 2 (GlesRenderer). Repli pixman si GLES est
   indisponible : ombres et coins dessinés en mémoire par tiny-skia, mis en
   cache.
@@ -717,12 +717,13 @@ packarch [OPTIONS]
 - **Tests unitaires** : lecture de `rc.xml`, `menu.xml`, `themerc` (tous les
   thèmes OB-Packarch-* doivent se lire sans erreur), couleurs, raccourcis
   AZERTY, placement, collage, régions.
-- **Tests d'intégration sans écran** : backend headless + pixman, clients de
-  test (wayland-client en Rust), touches et clics simulés par
-  virtual-keyboard / virtual-pointer, captures par screencopy comparées à des
-  images de référence (tolérance de quelques niveaux). Cas : menu racine
-  ouvert, sous-menu, Alt+Tab, fenêtre maximisée, coins et ombres à l'échelle
-  1 et 1,5.
+- **Tests d'intégration sans écran** : backend headless (GPU, ou rendu
+  logiciel de Mesa, décision 28), scénarios `tests/scenarios`, clients de
+  test (wayland-client en Rust), captures comparées à des images de
+  référence (décision 16). Cas : menu racine ouvert, sous-menu, Alt+Tab,
+  fenêtre maximisée, coins et ombres à l'échelle 1 et 1,5, rythme des
+  clients sur un et deux écrans, pointeur virtuel, capture d'écran et de
+  fenêtre par grim.
 - **Essais réels** : sur la machine de développement en session imbriquée
   (winit), puis sur packarch-test en session complète.
 - **CI** : `cargo fmt --check`, `cargo clippy -- -D warnings`,
@@ -923,5 +924,12 @@ Décidé le 17 novembre 2026 :
     disparue ou écran verrouillé : session arrêtée. Sessions de curseur
     non prises en charge (session aussitôt arrêtée). Client de test
     `fenetres-essai` (identifiant d'une fenêtre d'après son titre).
+28. Tests sans GPU : pas de backend pixman. Le rendu (coins arrondis,
+    ombres, loupe, contenu hors écran) repose sur des shaders GLES que
+    pixman ne sait pas exécuter ; un rendu pixman serait un autre rendu que
+    celui de la session. Le backend headless tourne sur le rendu logiciel
+    de Mesa (llvmpipe) : `tests/capture.sh --logiciel` et `tests/ci.sh
+    --logiciel` le choisissent et tolèrent 2 niveaux d'écart avec les
+    références, faites sur un GPU (option cachée `--tolerance N`).
 
 Aucune question ouverte pour l'instant.
