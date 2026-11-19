@@ -20,10 +20,23 @@ struct Entry {
     app: App,
 }
 
+/// Application à lancer depuis le menu des applications
+#[derive(Debug, Clone, PartialEq)]
+pub struct Launcher {
+    pub name: String,
+    pub icon: Option<String>,
+    /// Commande de `Exec`, sans les codes `%f`, `%U`…
+    pub exec: String,
+    /// À lancer dans un terminal (`Terminal=true`)
+    pub terminal: bool,
+    pub categories: Vec<String>,
+}
+
 #[derive(Default)]
 pub struct Apps {
     index: Option<Vec<Entry>>,
     cache: HashMap<String, Option<App>>,
+    launchers: Option<Vec<Launcher>>,
 }
 
 fn dirs() -> Vec<PathBuf> {
@@ -101,7 +114,134 @@ pub fn parse(text: &str, langs: &[String]) -> Option<(App, Option<String>)> {
     Some((App { name, icon }, wm_class))
 }
 
+/// Ligne `Exec` sans ses codes de champ: `%f`, `%F`, `%u`, `%U`, `%i`,
+/// `%c`, `%k` et les codes obsolètes sont retirés, `%%` donne `%`
+pub fn strip_field_codes(exec: &str) -> String {
+    let mut out = String::new();
+    let mut chars = exec.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        if let Some('%') = chars.next() {
+            out.push('%');
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Vrai si la liste `A;B;` contient un des bureaux de `desktops`
+fn shows_in(list: &str, desktops: &[String]) -> bool {
+    list.split(';')
+        .any(|d| desktops.iter().any(|x| x.eq_ignore_ascii_case(d.trim())))
+}
+
+/// Programme trouvé: chemin absolu existant, ou nom dans le PATH
+fn in_path(program: &str) -> bool {
+    if program.contains('/') {
+        return Path::new(program).is_file();
+    }
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
+}
+
+/// Lanceur d'un fichier `.desktop`, s'il doit paraître dans le menu des
+/// applications de `desktops` (bureaux de `XDG_CURRENT_DESKTOP`): type
+/// Application, ni `NoDisplay` ni `Hidden`, `OnlyShowIn`/`NotShowIn`
+/// respectés, programme de `TryExec` présent (vérifié par `exists`)
+pub fn parse_launcher(
+    text: &str,
+    langs: &[String],
+    desktops: &[String],
+    exists: impl Fn(&str) -> bool,
+) -> Option<Launcher> {
+    let (app, _) = parse(text, langs)?;
+    let mut in_entry = false;
+    let mut exec = None;
+    let mut terminal = false;
+    let mut categories = vec![];
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=').filter(|_| in_entry) else {
+            continue;
+        };
+        let (k, v) = (k.trim(), v.trim());
+        match k {
+            "Type" if v != "Application" => return None,
+            "NoDisplay" | "Hidden" if v == "true" => return None,
+            "OnlyShowIn" if !shows_in(v, desktops) => return None,
+            "NotShowIn" if shows_in(v, desktops) => return None,
+            "TryExec" if !v.is_empty() && !exists(v) => return None,
+            "Exec" => exec = Some(strip_field_codes(v)),
+            "Terminal" => terminal = v == "true",
+            "Categories" => {
+                categories = v
+                    .split(';')
+                    .filter(|c| !c.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            }
+            _ => {}
+        }
+    }
+    let exec = exec.filter(|e| !e.is_empty())?;
+    Some(Launcher {
+        name: app.name,
+        icon: app.icon,
+        exec,
+        terminal,
+        categories,
+    })
+}
+
 impl Apps {
+    /// Applications du menu, triées par nom (lues une fois, oubliées au
+    /// rechargement)
+    pub fn launchers(&mut self) -> &[Launcher] {
+        if self.launchers.is_none() {
+            let langs = languages();
+            let desktops: Vec<String> = std::env::var("XDG_CURRENT_DESKTOP")
+                .unwrap_or_else(|_| "packarch".into())
+                .split(':')
+                .map(str::to_string)
+                .collect();
+            let mut seen: Vec<String> = vec![];
+            let mut out: Vec<Launcher> = vec![];
+            for d in dirs() {
+                let Ok(rd) = std::fs::read_dir(&d) else { continue };
+                let mut files: Vec<PathBuf> = rd.flatten().map(|f| f.path()).collect();
+                files.sort();
+                for path in files {
+                    if path.extension().is_none_or(|e| e != "desktop") {
+                        continue;
+                    }
+                    let stem = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    // Le premier dossier gagne, même pour masquer
+                    if seen.contains(&stem) {
+                        continue;
+                    }
+                    seen.push(stem);
+                    let Ok(text) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    if let Some(l) = parse_launcher(&text, &langs, &desktops, in_path) {
+                        out.push(l);
+                    }
+                }
+            }
+            out.sort_by_cached_key(|l| l.name.to_lowercase());
+            self.launchers = Some(out);
+        }
+        self.launchers.as_deref().unwrap()
+    }
+
     fn index(&mut self) -> &[Entry] {
         if self.index.is_none() {
             let langs = languages();
@@ -138,6 +278,7 @@ impl Apps {
     pub fn clear(&mut self) {
         self.index = None;
         self.cache.clear();
+        self.launchers = None;
     }
 
     /// Application d'une vue d'après son app_id: fichier du même nom, fin du
@@ -177,5 +318,28 @@ mod tests {
         let (app, _) = parse(text, &[]).unwrap();
         assert_eq!(app.name, "Files");
         assert!(parse("[Autre]\nName=x\n", &[]).is_none());
+    }
+
+    #[test]
+    fn launcher() {
+        let desktops = ["packarch".to_string(), "wlroots".to_string()];
+        let text = "[Desktop Entry]\nType=Application\nName=Htop\nExec=htop %F\nTerminal=true\nCategories=System;Monitor;\nIcon=htop\n[Desktop Action x]\nExec=autre\n";
+        let l = parse_launcher(text, &[], &desktops, |_| true).unwrap();
+        assert_eq!(l.exec, "htop");
+        assert!(l.terminal);
+        assert_eq!(l.categories, ["System", "Monitor"]);
+        let hidden = |extra: &str| {
+            let t = format!("[Desktop Entry]\nType=Application\nName=A\nExec=a\n{extra}\n");
+            parse_launcher(&t, &[], &desktops, |p| p == "present").is_none()
+        };
+        assert!(!hidden(""));
+        assert!(hidden("NoDisplay=true"));
+        assert!(hidden("OnlyShowIn=GNOME;KDE;"));
+        assert!(!hidden("OnlyShowIn=XFCE;packarch;"));
+        assert!(hidden("NotShowIn=packarch;"));
+        assert!(hidden("TryExec=absent"));
+        assert!(!hidden("TryExec=present"));
+        assert!(hidden("Type=Link"));
+        assert_eq!(strip_field_codes("a --x=%u 100%% %F"), "a --x= 100%");
     }
 }

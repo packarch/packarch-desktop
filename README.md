@@ -76,7 +76,8 @@ sudo install -Dm644 docs/packarch.1 /usr/local/share/man/man1/packarch.1
 La session « packarch » apparaît alors dans le gestionnaire de connexion
 (ou `packarch` depuis une console). Sans `~/.config/packarch/rc.xml`, la
 configuration de `/etc/xdg/packarch` s'applique : clic droit sur le bureau
-ou Super+Espace pour le menu, Super+Entrée pour un terminal (`$TERMINAL`,
+ou Super+Espace pour le menu (applications installées par catégorie,
+fenêtres ouvertes, terminal, rechargement, veille, redémarrage, arrêt), Super+Entrée pour un terminal (`$TERMINAL`,
 sinon foot, kitty, alacritty… le premier installé), Super+Maj+e pour
 quitter. Pour la modifier, la copier dans `~/.config/packarch/`. Les
 thèmes de fenêtres sont ceux d'Openbox (`/usr/share/themes/*/openbox-3`).

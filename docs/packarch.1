@@ -96,7 +96,15 @@ est fourni s'il manque ;
 .B client\-menu
 (menu de fenêtre) et
 .B client\-list\-combined\-menu
-(fenêtres par bureau) sont générés s'ils ne sont pas définis. Un
+(fenêtres par bureau) et
+.B applications\-menu
+(applications installées, par catégorie, d'après les fichiers
+.I .desktop
+; celles à lancer dans un terminal s'ouvrent dans
+.BR $TERMINAL ,
+sinon foot, kitty…) sont générés s'ils ne sont pas définis, ouverts
+directement ou cités en sous-menu
+.RB ( <menu\ id= "applications\-menu" /> ). Un
 .B _
 avant une lettre d'un libellé en fait l'accélérateur.
 .TP

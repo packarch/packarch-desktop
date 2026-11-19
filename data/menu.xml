@@ -3,18 +3,36 @@
   Menu par défaut de packarch (/etc/xdg/packarch/menu.xml), lu quand
   ~/.config/packarch/rc.xml n'existe pas : clic droit sur le bureau ou
   Super+Espace. Format des menus d'Openbox (pipemenus acceptés).
+  Menus générés par packarch, à citer par leur identifiant :
+    applications-menu          applications installées, par catégorie
+    client-list-combined-menu  fenêtres ouvertes, par bureau
 -->
 <openbox_menu>
+  <menu id="session-menu" label="Session" icon="system-shutdown">
+    <item label="Mettre en _veille" icon="system-suspend">
+      <action name="Execute" command="systemctl suspend" />
+    </item>
+    <item label="_Redémarrer" icon="system-reboot">
+      <action name="Execute" command="systemctl reboot" />
+    </item>
+    <item label="É_teindre" icon="system-shutdown">
+      <action name="Execute" command="systemctl poweroff" />
+    </item>
+    <separator />
+    <item label="_Quitter la session" icon="system-log-out">
+      <action name="Exit" />
+    </item>
+  </menu>
   <menu id="root-menu" label="packarch">
-    <item label="_Terminal">
+    <menu id="applications-menu" />
+    <menu id="client-list-combined-menu" />
+    <item label="_Terminal" icon="utilities-terminal">
       <action name="Execute" command="for t in &quot;$TERMINAL&quot; foot kitty alacritty wezterm konsole gnome-terminal xfce4-terminal xterm; do command -v &quot;$t&quot; &gt;/dev/null 2&gt;&amp;1 &amp;&amp; exec &quot;$t&quot;; done" />
     </item>
     <separator />
-    <item label="_Recharger la configuration">
+    <item label="Re_charger" icon="view-refresh">
       <action name="Reconfigure" />
     </item>
-    <item label="_Quitter">
-      <action name="Exit" />
-    </item>
+    <menu id="session-menu" />
   </menu>
 </openbox_menu>

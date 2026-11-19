@@ -22,7 +22,7 @@ use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size, Transform}
 use tracing::{debug, info, warn};
 
 use super::draw::{self, MenuLayout};
-use super::{CLIENT, CLIENT_LIST, Entry, Label, Menu, Menus};
+use super::{APPS, CLIENT, CLIENT_LIST, Entry, Label, Menu, Menus};
 use crate::actions::{Action, DesktopTarget};
 use crate::anim::{Anim, Kind};
 use crate::state::State;
@@ -174,9 +174,24 @@ impl State {
                 store.map.insert(m.id.clone(), m);
             }
         }
-        if id == CLIENT_LIST && !store.map.contains_key(CLIENT_LIST) {
+        // Menus générés, ouverts directement ou en sous-menu, sauf s'ils sont
+        // définis dans menu.xml
+        let cited = |store: &Menus, wanted: &str| {
+            id == wanted
+                || store.map.values().any(|m| {
+                    m.entries
+                        .iter()
+                        .any(|e| matches!(e, Entry::Menu(x) if x == wanted))
+                })
+        };
+        if !store.map.contains_key(CLIENT_LIST) && cited(&store, CLIENT_LIST) {
             let m = self.client_list_menu();
             store.map.insert(m.id.clone(), m);
+        }
+        if !store.map.contains_key(APPS) && cited(&store, APPS) {
+            for m in super::applications_menus(self.apps.launchers()) {
+                store.map.insert(m.id.clone(), m);
+            }
         }
         let Some(menu) = store.get(id) else {
             warn!("menu inconnu: {id}");

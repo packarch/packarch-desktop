@@ -124,6 +124,116 @@ pub struct Menus {
 pub const ROOT: &str = "root-menu";
 pub const CLIENT: &str = "client-menu";
 pub const CLIENT_LIST: &str = "client-list-combined-menu";
+/// Applications installées, par catégorie (fichiers `.desktop`)
+pub const APPS: &str = "applications-menu";
+
+/// Terminaux essayés dans l'ordre, après `$TERMINAL`
+const TERMINALS: &str = "foot kitty alacritty konsole xfce4-terminal gnome-terminal xterm";
+
+/// Commande qui ouvre `command` (ligne de commande du shell) dans le
+/// premier terminal installé: `$TERMINAL`, sinon foot, kitty…; vide: le
+/// terminal seul
+pub fn in_terminal(command: &str) -> String {
+    if command.is_empty() {
+        return format!(
+            "for t in \"$TERMINAL\" {TERMINALS}; do command -v \"$t\" >/dev/null 2>&1 && exec \"$t\"; done"
+        );
+    }
+    format!(
+        "for t in \"$TERMINAL\" {TERMINALS}; do command -v \"$t\" >/dev/null 2>&1 || continue; \
+         case \"${{t##*/}}\" in gnome-terminal) exec \"$t\" -- {command};; \
+         xfce4-terminal) exec \"$t\" -x {command};; *) exec \"$t\" -e {command};; esac; done"
+    )
+}
+
+/// Catégories principales de freedesktop.org: identifiant, libellé, icône
+const CATEGORIES: &[(&[&str], &str, &str)] = &[
+    (&["Utility"], "Accessoires", "applications-utilities"),
+    (&["Office"], "Bureautique", "applications-office"),
+    (&["Development"], "Développement", "applications-development"),
+    (&["Education"], "Éducation", "applications-education"),
+    (&["Graphics"], "Graphisme", "applications-graphics"),
+    (&["Network"], "Internet", "applications-internet"),
+    (&["Game"], "Jeux", "applications-games"),
+    (
+        &["AudioVideo", "Audio", "Video"],
+        "Multimédia",
+        "applications-multimedia",
+    ),
+    (&["Settings"], "Paramètres", "preferences-system"),
+    (&["Science"], "Sciences", "applications-science"),
+    (&["System"], "Système", "applications-system"),
+];
+
+/// Menu des applications (`applications-menu`) et ses sous-menus par
+/// catégorie, dans l'ordre des libellés; « Autres » pour les applications
+/// sans catégorie connue. Une application a une seule catégorie: la
+/// première des siennes qui est connue
+pub fn applications_menus(launchers: &[crate::apps::Launcher]) -> Vec<Menu> {
+    let mut groups: Vec<Vec<Entry>> = vec![vec![]; CATEGORIES.len() + 1];
+    for l in launchers {
+        let group = l
+            .categories
+            .iter()
+            .find_map(|c| {
+                CATEGORIES
+                    .iter()
+                    .position(|(ids, _, _)| ids.contains(&c.as_str()))
+            })
+            .unwrap_or(CATEGORIES.len());
+        let command = if l.terminal {
+            in_terminal(&l.exec)
+        } else {
+            l.exec.clone()
+        };
+        groups[group].push(Entry::Item {
+            label: Label::plain(&l.name),
+            icon: l.icon.clone(),
+            actions: vec![Action::Execute(command)],
+            target: None,
+            checked: false,
+            enabled: true,
+        });
+    }
+    let mut menus = vec![];
+    let mut root = vec![];
+    for (i, entries) in groups.into_iter().enumerate() {
+        if entries.is_empty() {
+            continue;
+        }
+        let (label, icon) = CATEGORIES
+            .get(i)
+            .map(|(_, l, ic)| (*l, *ic))
+            .unwrap_or(("Autres", "applications-other"));
+        let id = format!("{APPS}:{label}");
+        root.push(Entry::Menu(id.clone()));
+        menus.push(Menu {
+            id,
+            label: Label::plain(label),
+            icon: Some(icon.into()),
+            execute: None,
+            entries,
+        });
+    }
+    if root.is_empty() {
+        root.push(Entry::Item {
+            label: Label::plain("—"),
+            icon: None,
+            actions: vec![],
+            target: None,
+            checked: false,
+            enabled: false,
+        });
+    }
+    menus.push(Menu {
+        id: APPS.into(),
+        label: Label::plain("Applications"),
+        icon: Some("applications-all".into()),
+        execute: None,
+        entries: root,
+    });
+    menus
+}
 
 fn is(node: roxmltree::Node, name: &str) -> bool {
     node.is_element() && node.tag_name().name().eq_ignore_ascii_case(name)
@@ -265,7 +375,7 @@ fn default_root() -> Menu {
         icon: None,
         execute: None,
         entries: vec![
-            Entry::item("_Terminal", vec![Action::Execute("kitty".into())]),
+            Entry::item("_Terminal", vec![Action::Execute(in_terminal(""))]),
             Entry::Separator(None),
             Entry::item("_Recharger la configuration", vec![Action::Reconfigure]),
             Entry::item("_Quitter", vec![Action::Exit]),
@@ -275,6 +385,62 @@ fn default_root() -> Menu {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn applications() {
+        use crate::apps::Launcher;
+        let l = |name: &str, cats: &[&str], terminal: bool| Launcher {
+            name: name.into(),
+            icon: None,
+            exec: name.to_lowercase(),
+            terminal,
+            categories: cats.iter().map(|c| c.to_string()).collect(),
+        };
+        let menus = applications_menus(&[
+            l("Firefox", &["Network", "WebBrowser"], false),
+            l("Htop", &["System", "Monitor"], true),
+            l("Thunar", &["System", "Utility", "FileManager"], false),
+            l("Truc", &["X-Inconnu"], false),
+            l("Mpv", &["AudioVideo", "Video"], false),
+        ]);
+        let root = menus.iter().find(|m| m.id == APPS).unwrap();
+        let ids: Vec<_> = root
+            .entries
+            .iter()
+            .map(|e| match e {
+                Entry::Menu(id) => id.as_str(),
+                _ => "",
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "applications-menu:Internet",
+                "applications-menu:Multimédia",
+                "applications-menu:Système",
+                "applications-menu:Autres"
+            ]
+        );
+        let system = menus.iter().find(|m| m.id.ends_with("Système")).unwrap();
+        assert_eq!(system.entries.len(), 2);
+        let Entry::Item { actions, .. } = &system.entries[0] else {
+            panic!()
+        };
+        let Action::Execute(cmd) = &actions[0] else {
+            panic!()
+        };
+        assert!(cmd.contains("-e htop") && cmd.contains("$TERMINAL"), "{cmd}");
+        assert!(applications_menus(&[]).iter().any(|m| m.id == APPS));
+        // Commandes du terminal valides pour sh
+        for cmd in [in_terminal(""), in_terminal("htop -d 10")] {
+            let ok = std::process::Command::new("sh")
+                .args(["-n", "-c", &cmd])
+                .status()
+                .unwrap();
+            assert!(ok.success(), "{cmd}");
+        }
+    }
+
     use super::*;
 
     #[test]

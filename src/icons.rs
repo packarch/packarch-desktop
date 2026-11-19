@@ -136,7 +136,13 @@ impl Icons {
             let bases = base_dirs();
             let mut chain = vec![];
             let mut seen: Vec<String> = vec![];
-            let mut queue = vec![self.theme.clone()];
+            // Sans thème réglé: Adwaita (dépendance de GTK), puis hicolor
+            let first = if self.theme.is_empty() {
+                "Adwaita"
+            } else {
+                &self.theme
+            };
+            let mut queue = vec![first.to_string()];
             while let Some(name) = queue.first().cloned() {
                 queue.remove(0);
                 if name.is_empty() || seen.contains(&name) {
