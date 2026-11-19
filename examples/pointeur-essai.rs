@@ -7,6 +7,7 @@
 //!   abs X Y L H     mouvement absolu en (X, Y) sur une étendue L × H
 //!   rel DX DY       mouvement relatif
 //!   press | release bouton gauche
+//!   rpress | rrelease bouton droit
 //!   scroll N        N crans de molette verticale (négatif : vers le haut)
 //! ```
 //!
@@ -21,6 +22,7 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 };
 
 const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
 
 #[derive(Default)]
 struct Client {
@@ -83,6 +85,8 @@ fn main() {
             "rel" => pointer.motion(time, num(it.next()), num(it.next())),
             "press" => pointer.button(time, BTN_LEFT, wl_pointer::ButtonState::Pressed),
             "release" => pointer.button(time, BTN_LEFT, wl_pointer::ButtonState::Released),
+            "rpress" => pointer.button(time, BTN_RIGHT, wl_pointer::ButtonState::Pressed),
+            "rrelease" => pointer.button(time, BTN_RIGHT, wl_pointer::ButtonState::Released),
             "scroll" => {
                 let n = num(it.next()) as i32;
                 pointer.axis_source(wl_pointer::AxisSource::Wheel);
