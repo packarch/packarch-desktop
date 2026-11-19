@@ -107,7 +107,11 @@ fn render(state: &mut State) {
     let mut states = None;
     match renderer.bind(target) {
         Ok(mut fb) => {
-            match damage.render_output(renderer, &mut fb, 1, &elements, CLEAR.premultiplied()) {
+            // Une capture est rendue en entier : avec un rendu partiel, ses
+            // pixels dépendraient des dégâts des images précédentes (donc du
+            // rythme des clients), à un niveau près sur les bords lissés
+            let age = if captures.is_empty() { 1 } else { 0 };
+            match damage.render_output(renderer, &mut fb, age, &elements, CLEAR.premultiplied()) {
                 Ok(r) => states = Some(r.states),
                 Err(e) => warn!("rendu: {e:?}"),
             }
