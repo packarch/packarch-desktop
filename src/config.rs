@@ -199,7 +199,7 @@ pub struct Config {
     pub xwayland_persistence: bool,
     /// Clients X11 rendus à l'échelle de l'écran (nets) au lieu d'être agrandis
     pub xwayland_sharp: bool,
-    /// Logo pacman au centre du fond, sous les fonds d'écran
+    /// Fond par défaut (labyrinthe du thème packarch), sous les fonds d'écran
     pub logo: bool,
     pub adaptive_sync: AdaptiveSync,
     pub placement: Placement,

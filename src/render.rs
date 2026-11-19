@@ -835,7 +835,8 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
 
     elements.extend(layer_elements(renderer, Layer::Bottom));
     elements.extend(layer_elements(renderer, Layer::Background));
-    // Logo sous les fonds d'écran: caché dès qu'un programme en pose un
+    // Fond par défaut (labyrinthe), sous les fonds d'écran: caché dès
+    // qu'un programme en pose un
     if state.config.logo {
         let screen = state.output_geometry(output).size;
         if let Some((buffer, px, rect)) = state.logo.get(screen, scale) {
@@ -849,7 +850,7 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
                 Kind::Unspecified,
             ) {
                 Ok(e) => elements.push(Elem::Memory(e)),
-                Err(e) => warn!("logo du fond: {e:?}"),
+                Err(e) => warn!("fond par défaut: {e:?}"),
             }
         }
     }

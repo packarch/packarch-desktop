@@ -10,8 +10,8 @@
 -->
 <packarch_config>
   <core>
-    <!-- Pacman gris au centre du fond, caché par un fond d'écran
-         (swaybg…) ; no : fond uni -->
+    <!-- Fond par défaut : le labyrinthe du thème packarch, caché par un
+         fond d'écran (swaybg…) ; no : fond uni -->
     <logo>yes</logo>
   </core>
   <theme>
