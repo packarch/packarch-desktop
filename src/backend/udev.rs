@@ -578,7 +578,7 @@ impl State {
         let mut elements = self.cursor_elements(&mut u.renderer, &output);
         let cursor = elements.len();
         elements.extend(output_elements(self, &mut u.renderer, &output));
-        crate::protocols::screencopy::process(self, &mut u.renderer, &output, &elements, cursor);
+        crate::protocols::capture(self, &mut u.renderer, &output, &elements, cursor);
         let animating = self.animating();
         let want_vrr = self.want_vrr(&output);
         let s = u.surfaces.get_mut(&crtc).unwrap();

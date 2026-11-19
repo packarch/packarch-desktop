@@ -15,7 +15,8 @@ use std::sync::Mutex;
 
 use smithay::backend::allocator::{Buffer, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
+use smithay::backend::renderer::element::RenderElement;
+use smithay::backend::renderer::gles::{GlesRenderer, GlesTarget, GlesTexture};
 use smithay::backend::renderer::{Bind, Blit, ExportMem, Offscreen, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm};
@@ -54,18 +55,141 @@ struct Request {
     damage: bool,
 }
 
-/// Image d'un écran gardée pour un client : redessinée seulement là où
-/// elle a changé depuis sa dernière copie
-struct Session {
-    manager: ZwlrScreencopyManagerV1,
-    output: Output,
-    cursor: bool,
-    size: Size<i32, Physical>,
-    scale: f64,
+/// Image gardée d'une copie à l'autre (wlr-screencopy, ext-image-copy-capture) :
+/// redessinée seulement là où elle a changé
+pub struct Image {
+    pub size: Size<i32, Physical>,
+    pub scale: f64,
     texture: GlesTexture,
     tracker: OutputDamageTracker,
     /// Rien encore dessiné : la première image est entière
     fresh: bool,
+}
+
+impl Image {
+    pub fn new(renderer: &mut GlesRenderer, size: Size<i32, Physical>, scale: f64) -> anyhow::Result<Image> {
+        Ok(Image {
+            size,
+            scale,
+            texture: renderer.create_buffer(Fourcc::Abgr8888, (size.w, size.h).into())?,
+            tracker: OutputDamageTracker::new(size, scale, Transform::Normal),
+            fresh: true,
+        })
+    }
+
+    /// Redessine l'image puis copie `region` dans le tampon du client. Rend
+    /// les zones changées dans la région (coordonnées de la région), ou
+    /// `None` si `need_change` et que rien n'a changé.
+    pub fn capture<E: RenderElement<GlesRenderer>>(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        elements: &[E],
+        region: Rectangle<i32, Physical>,
+        buffer: &WlBuffer,
+        need_change: bool,
+    ) -> anyhow::Result<Option<Vec<Rectangle<i32, Physical>>>> {
+        let full = Rectangle::from_size(self.size);
+        let mut fb = renderer.bind(&mut self.texture)?;
+        let age = if self.fresh { 0 } else { 1 };
+        let result = self
+            .tracker
+            .render_output(renderer, &mut fb, age, elements, CLEAR.premultiplied())
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        let changed = if self.fresh {
+            vec![full]
+        } else {
+            result.damage.cloned().unwrap_or_default()
+        };
+        self.fresh = false;
+        let damage: Vec<Rectangle<i32, Physical>> = changed
+            .iter()
+            .filter_map(|d| d.intersection(region))
+            .map(|d| Rectangle::new(d.loc - region.loc, d.size))
+            .collect();
+        if need_change && damage.is_empty() {
+            return Ok(None);
+        }
+        write_buffer(renderer, &fb, region, buffer)?;
+        Ok(Some(damage))
+    }
+}
+
+/// Le tampon du client a la taille voulue et un format accepté
+pub fn buffer_fits(buffer: &WlBuffer, size: Size<i32, Physical>) -> bool {
+    match smithay::wayland::dmabuf::get_dmabuf(buffer) {
+        Ok(d) => {
+            let s = d.size();
+            (s.w, s.h) == (size.w, size.h) && DMABUF_FORMATS.contains(&d.format().code)
+        }
+        Err(_) => smithay::wayland::shm::with_buffer_contents(buffer, |_, _, b| {
+            b.width == size.w
+                && b.height == size.h
+                && b.stride >= size.w * 4
+                && SHM_FORMATS.contains(&b.format)
+        })
+        .unwrap_or(false),
+    }
+}
+
+/// Copie `region` de l'image liée `fb` dans le tampon du client : par le GPU
+/// pour un dmabuf, par le processeur pour un tampon shm
+fn write_buffer(
+    renderer: &mut GlesRenderer,
+    fb: &GlesTarget<'_>,
+    region: Rectangle<i32, Physical>,
+    buffer: &WlBuffer,
+) -> anyhow::Result<()> {
+    if let Ok(dmabuf) = smithay::wayland::dmabuf::get_dmabuf(buffer) {
+        // Copie terminée avant que le client ne lise le tampon
+        let mut dmabuf = dmabuf.clone();
+        let mut dst = renderer.bind(&mut dmabuf)?;
+        renderer.blit(
+            fb,
+            &mut dst,
+            region,
+            Rectangle::from_size(region.size),
+            TextureFilter::Nearest,
+        )?;
+        renderer.with_context(|gl| unsafe { gl.Finish() })?;
+        return Ok(());
+    }
+    let area = Rectangle::new(
+        (region.loc.x, region.loc.y).into(),
+        (region.size.w, region.size.h).into(),
+    );
+    let mapping = renderer.copy_framebuffer(fb, area, Fourcc::Abgr8888)?;
+    let pixels = renderer.map_texture(&mapping)?;
+    let written = smithay::wayland::shm::with_buffer_contents_mut(buffer, |ptr, len, b| {
+        let w = region.size.w as usize;
+        let need = b.offset as usize + b.stride as usize * (region.size.h as usize - 1) + w * 4;
+        if need > len || pixels.len() < w * 4 * region.size.h as usize {
+            return false;
+        }
+        for y in 0..region.size.h as usize {
+            let src = &pixels[y * w * 4..(y + 1) * w * 4];
+            // Sûr: la taille du tampon a été vérifiée ci-dessus
+            let dst = unsafe {
+                std::slice::from_raw_parts_mut(ptr.add(b.offset as usize + y * b.stride as usize), w * 4)
+            };
+            // RVBA → BVRX (xrgb8888 petit-boutiste)
+            for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
+                *d = [s[2], s[1], s[0], 255];
+            }
+        }
+        true
+    });
+    match written {
+        Ok(true) => Ok(()),
+        _ => anyhow::bail!("tampon shm trop petit"),
+    }
+}
+
+/// Copie d'un écran demandée par un client
+struct Session {
+    manager: ZwlrScreencopyManagerV1,
+    output: Output,
+    cursor: bool,
+    image: Image,
 }
 
 pub struct Screencopy {
@@ -84,8 +208,8 @@ impl Screencopy {
 }
 
 /// Formats des tampons acceptés : shm et dmabuf
-const SHM_FORMATS: [wl_shm::Format; 2] = [wl_shm::Format::Xrgb8888, wl_shm::Format::Argb8888];
-const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Xrgb8888, Fourcc::Argb8888];
+pub const SHM_FORMATS: [wl_shm::Format; 2] = [wl_shm::Format::Xrgb8888, wl_shm::Format::Argb8888];
+pub const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Xrgb8888, Fourcc::Argb8888];
 
 /// Taille de l'écran en pixels physiques
 fn output_size(output: &Output) -> Size<i32, Physical> {
@@ -242,19 +366,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for State {
             *used = true;
         }
         let size = data.region.size;
-        let valid = match smithay::wayland::dmabuf::get_dmabuf(&buffer) {
-            Ok(d) => {
-                let s = d.size();
-                (s.w, s.h) == (size.w, size.h) && DMABUF_FORMATS.contains(&d.format().code)
-            }
-            Err(_) => smithay::wayland::shm::with_buffer_contents(&buffer, |_, _, b| {
-                b.width == size.w
-                    && b.height == size.h
-                    && b.stride >= size.w * 4
-                    && SHM_FORMATS.contains(&b.format)
-            })
-            .unwrap_or(false),
-        };
+        let valid = buffer_fits(&buffer, size);
         if !valid {
             resource.post_error(zwlr_screencopy_frame_v1::Error::InvalidBuffer, "tampon invalide");
             return;
@@ -272,7 +384,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for State {
 }
 
 /// Instant présent, horloge monotone: (secondes, nanosecondes)
-fn monotonic() -> (u64, u32) {
+pub fn monotonic() -> (u64, u32) {
     let mut ts = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,
@@ -311,10 +423,10 @@ pub fn process(
             .iter()
             .position(|s| s.manager == r.manager && s.output == *output && s.cursor == r.cursor)
         {
-            Some(i) if sc.sessions[i].size == size && sc.sessions[i].scale == scale => i,
+            Some(i) if sc.sessions[i].image.size == size && sc.sessions[i].image.scale == scale => i,
             found => {
-                let texture = match renderer.create_buffer(Fourcc::Abgr8888, (size.w, size.h).into()) {
-                    Ok(t) => t,
+                let image = match Image::new(renderer, size, scale) {
+                    Ok(image) => image,
                     Err(e) => {
                         warn!("capture d'écran: {e}");
                         r.frame.failed();
@@ -325,11 +437,7 @@ pub fn process(
                     manager: r.manager.clone(),
                     output: output.clone(),
                     cursor: r.cursor,
-                    size,
-                    scale,
-                    texture,
-                    tracker: OutputDamageTracker::new(size, scale, Transform::Normal),
-                    fresh: true,
+                    image,
                 };
                 match found {
                     Some(i) => {
@@ -349,7 +457,10 @@ pub fn process(
         } else {
             &elements[cursor.min(elements.len())..]
         };
-        match copy(renderer, session, elements, &r) {
+        match session
+            .image
+            .capture(renderer, elements, r.region, &r.buffer, r.damage)
+        {
             Ok(Some(damage)) => {
                 r.frame.flags(zwlr_screencopy_frame_v1::Flags::empty());
                 if r.damage {
@@ -368,81 +479,5 @@ pub fn process(
                 r.frame.failed();
             }
         }
-    }
-}
-
-/// Met à jour l'image de la session puis la copie dans le tampon du client.
-/// Rend les zones changées dans la région (coordonnées de la région), ou
-/// `None` pour une copie avec dégâts quand rien n'a changé.
-fn copy(
-    renderer: &mut GlesRenderer,
-    session: &mut Session,
-    elements: &[Elem],
-    r: &Request,
-) -> anyhow::Result<Option<Vec<Rectangle<i32, Physical>>>> {
-    let region = r.region;
-    let full = Rectangle::from_size(session.size);
-    let mut fb = renderer.bind(&mut session.texture)?;
-    let age = if session.fresh { 0 } else { 1 };
-    let result = session
-        .tracker
-        .render_output(renderer, &mut fb, age, elements, CLEAR.premultiplied())
-        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let changed = if session.fresh {
-        vec![full]
-    } else {
-        result.damage.cloned().unwrap_or_default()
-    };
-    session.fresh = false;
-    let damage: Vec<Rectangle<i32, Physical>> = changed
-        .iter()
-        .filter_map(|d| d.intersection(region))
-        .map(|d| Rectangle::new(d.loc - region.loc, d.size))
-        .collect();
-    if r.damage && damage.is_empty() {
-        return Ok(None);
-    }
-    if let Ok(dmabuf) = smithay::wayland::dmabuf::get_dmabuf(&r.buffer) {
-        // Copie par le GPU, terminée avant que le client ne lise le tampon
-        let mut dmabuf = dmabuf.clone();
-        let mut dst = renderer.bind(&mut dmabuf)?;
-        renderer.blit(
-            &fb,
-            &mut dst,
-            region,
-            Rectangle::from_size(region.size),
-            TextureFilter::Nearest,
-        )?;
-        renderer.with_context(|gl| unsafe { gl.Finish() })?;
-        return Ok(Some(damage));
-    }
-    let area = Rectangle::new(
-        (region.loc.x, region.loc.y).into(),
-        (region.size.w, region.size.h).into(),
-    );
-    let mapping = renderer.copy_framebuffer(&fb, area, Fourcc::Abgr8888)?;
-    let pixels = renderer.map_texture(&mapping)?;
-    let written = smithay::wayland::shm::with_buffer_contents_mut(&r.buffer, |ptr, len, b| {
-        let w = region.size.w as usize;
-        let need = b.offset as usize + b.stride as usize * (region.size.h as usize - 1) + w * 4;
-        if need > len || pixels.len() < w * 4 * region.size.h as usize {
-            return false;
-        }
-        for y in 0..region.size.h as usize {
-            let src = &pixels[y * w * 4..(y + 1) * w * 4];
-            // Sûr: la taille du tampon a été vérifiée ci-dessus
-            let dst = unsafe {
-                std::slice::from_raw_parts_mut(ptr.add(b.offset as usize + y * b.stride as usize), w * 4)
-            };
-            // RVBA → BVRX (xrgb8888 petit-boutiste)
-            for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
-                *d = [s[2], s[1], s[0], 255];
-            }
-        }
-        true
-    });
-    match written {
-        Ok(true) => Ok(Some(damage)),
-        _ => anyhow::bail!("tampon shm trop petit"),
     }
 }

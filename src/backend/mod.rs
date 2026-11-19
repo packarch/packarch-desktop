@@ -60,6 +60,17 @@ pub fn init_renderer(state: &mut State, renderer: &mut GlesRenderer) {
     let node = EGLDevice::device_for_display(renderer.egl_context().display())
         .ok()
         .and_then(|d| d.try_get_render_node().ok().flatten());
+    // Captures dans des tampons dmabuf : formats que le moteur sait dessiner
+    state.capture_dmabuf = node.map(|n| {
+        let mut formats: Vec<(smithay::backend::allocator::Fourcc, Vec<u64>)> = vec![];
+        for f in renderer.egl_context().dmabuf_render_formats().iter() {
+            match formats.iter_mut().find(|(c, _)| *c == f.code) {
+                Some((_, m)) => m.push(u64::from(f.modifier)),
+                None => formats.push((f.code, vec![u64::from(f.modifier)])),
+            }
+        }
+        (n.dev_id(), formats)
+    });
     let mut dmabuf_state = DmabufState::new();
     let global = match node.map(|n| DmabufFeedbackBuilder::new(n.dev_id(), formats.clone()).build()) {
         Some(Ok(feedback)) => {

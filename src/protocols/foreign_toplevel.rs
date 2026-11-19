@@ -47,6 +47,15 @@ pub struct WlrToplevels {
 }
 
 impl WlrToplevels {
+    /// Vue d'une poignée ext-foreign-toplevel
+    pub fn view_of(&self, handle: &ForeignToplevelHandle) -> Option<u64> {
+        let id = handle.identifier();
+        self.entries
+            .iter()
+            .find(|e| e.ext.identifier() == id)
+            .map(|e| e.id)
+    }
+
     pub fn new(dh: &DisplayHandle) -> WlrToplevels {
         dh.create_global::<State, ZwlrForeignToplevelManagerV1, _>(VERSION, ());
         WlrToplevels {

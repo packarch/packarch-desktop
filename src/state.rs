@@ -86,6 +86,8 @@ pub struct State {
     pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub dmabuf: Option<(DmabufState, DmabufGlobal)>,
+    /// Tampons dmabuf des captures (ext-image-copy-capture)
+    pub capture_dmabuf: Option<crate::protocols::image_capture::CaptureDmabuf>,
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
@@ -317,6 +319,7 @@ impl State {
             layer_shell_state,
             shm_state,
             dmabuf: None,
+            capture_dmabuf: None,
             output_manager_state,
             seat_state,
             data_device_state,

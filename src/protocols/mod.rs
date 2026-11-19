@@ -5,6 +5,7 @@
 //! Smithay ne fournit pas sont dans les sous-modules.
 
 pub mod foreign_toplevel;
+pub mod image_capture;
 pub mod outputs;
 pub mod screencopy;
 pub mod virtual_pointer;
@@ -63,6 +64,20 @@ use tracing::{info, warn};
 
 use crate::state::{ClientState, State};
 
+/// Copies d'écran et de fenêtres demandées (wlr-screencopy,
+/// ext-image-copy-capture), faites au rendu de `output`. `elements`
+/// commence par les `cursor` éléments du curseur.
+pub fn capture(
+    state: &mut State,
+    renderer: &mut smithay::backend::renderer::gles::GlesRenderer,
+    output: &Output,
+    elements: &[crate::render::Elem],
+    cursor: usize,
+) {
+    screencopy::process(state, renderer, output, elements, cursor);
+    image_capture::process(state, renderer, output, elements, cursor);
+}
+
 /// Client de confiance: pas lancé dans un bac à sable (Flatpak…), il peut
 /// voir les protocoles privilégiés (verrouillage, capture, presse-papiers)
 pub fn trusted(client: &Client) -> bool {
@@ -98,6 +113,7 @@ pub struct Protocols {
     pub wlr_toplevels: foreign_toplevel::WlrToplevels,
     pub workspaces: workspace::Workspaces,
     pub screencopy: screencopy::Screencopy,
+    pub image_capture: image_capture::ImageCapture,
     pub outputs: outputs::OutputTools,
 }
 
@@ -133,6 +149,7 @@ impl Protocols {
             wlr_toplevels: foreign_toplevel::WlrToplevels::new(dh),
             workspaces: workspace::Workspaces::new(dh),
             screencopy: screencopy::Screencopy::new(dh),
+            image_capture: image_capture::ImageCapture::new(dh),
             outputs: outputs::OutputTools::new(dh),
         }
     }

@@ -43,7 +43,7 @@ xcursor = "0.3"
 # unie, pointeur virtuel
 [dev-dependencies]
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
+wayland-protocols = { version = "0.32.13", features = ["client", "unstable", "staging"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 
 [[example]]
@@ -51,6 +51,9 @@ name = "client-essai"
 
 [[example]]
 name = "pointeur-essai"
+
+[[example]]
+name = "fenetres-essai"
 
 [profile.release]
 debug = "line-tables-only"

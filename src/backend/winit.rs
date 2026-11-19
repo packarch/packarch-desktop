@@ -86,7 +86,7 @@ fn render(state: &mut State) {
     };
     let output = w.output.clone();
     let elements = output_elements(state, w.backend.renderer(), &output);
-    crate::protocols::screencopy::process(state, w.backend.renderer(), &output, &elements, 0);
+    crate::protocols::capture(state, w.backend.renderer(), &output, &elements, 0);
     // Âge du tampon: sa lecture échoue avec certains pilotes (NVIDIA);
     // en fenêtre imbriquée, tout redessiner suffit
     let age = 0;

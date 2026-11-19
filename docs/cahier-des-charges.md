@@ -906,5 +906,19 @@ Décidé le 17 novembre 2026 :
     elle aboutissait à chaque requête, image entière, même écran immobile
     (un enregistreur faisait tourner le rendu en boucle). Scénario
     `capture` (grim : écran entier, région, sans curseur).
+27. ext-image-copy-capture et ext-image-capture-source : sources écran et
+    fenêtre (poignée ext-foreign-toplevel-list), pour grim 1.5 (`-T`) et
+    xdg-desktop-portal-wlr 0.8 (partage d'une seule fenêtre). Une fenêtre
+    est capturée seule, à la taille de sa géométrie, à l'échelle de son
+    écran, avec ses menus surgissants, sans cadre ni ombre, même recouverte
+    ou sur un autre bureau. Même image gardée que wlr-screencopy (décision
+    26) : une image n'est rendue au client que lorsqu'elle a changé (la
+    première tout de suite), avec les zones changées et celles que le
+    client dit périmées. Tampons shm, ou dmabuf aux formats que le moteur
+    sait dessiner (nœud de rendu annoncé). Changement de taille : nouvelles
+    contraintes, l'image en cours échoue (`buffer_constraints`). Source
+    disparue ou écran verrouillé : session arrêtée. Sessions de curseur
+    non prises en charge (session aussitôt arrêtée). Client de test
+    `fenetres-essai` (identifiant d'une fenêtre d'après son titre).
 
 Aucune question ouverte pour l'instant.
