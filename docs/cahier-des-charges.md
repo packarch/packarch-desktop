@@ -1002,7 +1002,7 @@ Décidé le 17 novembre 2026 :
     menus générés ne paraissent que là où un `menu.xml` les cite : le menu
     de Packarch ne change pas. Fond : pacman et trois pastilles
     (`data/logo.svg`, dessiné pour packarch, sans couleur, à peine plus
-    clair que le fond : `#26262d` sur `#1a1a1f` ; intégré au programme et
+    sombre que le fond : `#121216` sur `#1a1a1f` ; intégré au programme et
     rendu par resvg à 20 % de la hauteur de l'écran), dessiné
     sous les couches de fond : un fond d'écran (swaybg) le cache.
     `<core><logo>no</logo></core>` le retire, comme

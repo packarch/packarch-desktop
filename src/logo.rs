@@ -11,7 +11,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::utils::{Logical, Point, Rectangle, Size, Transform};
 
-/// Pacman et trois pastilles, d'une teinte à peine plus claire que le fond
+/// Pacman et trois pastilles, d'une teinte à peine plus sombre que le fond
 const SVG: &[u8] = include_bytes!("../data/logo.svg");
 
 /// Hauteur du logo, en fraction de la hauteur de l'écran
