@@ -84,8 +84,9 @@ pub fn init_renderer(state: &mut State, renderer: &mut GlesRenderer) {
 /// présentation qu'au rythme de cet écran. Sinon, avec deux écrans non
 /// synchronisés, un client recevrait deux rappels par période et XWayland
 /// croirait l'écran à 120 Hz (vidéo saccadée). Les surfaces invisibles
-/// reçoivent un rappel par seconde. Sans `states` (winit, headless : un seul
-/// écran), toutes les surfaces sont sur cet écran.
+/// reçoivent un rappel par seconde. Sans `states` (winit : un seul écran),
+/// toutes les surfaces sont sur cet écran. Headless passe ses états, pour
+/// que les scénarios exercent ce chemin (`expect-primary`).
 pub fn after_render(
     state: &mut State,
     output: &Output,

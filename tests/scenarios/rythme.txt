@@ -1,0 +1,30 @@
+# Rythme des clients (décision 24) : une fenêtre visible a un écran
+# principal et reçoit un rappel de trame à chaque rendu ; une fenêtre
+# invisible n'en a pas (un rappel par seconde). Fenêtres arrondies (contenu
+# hors écran) : la 1.3.1 les croyait invisibles, une fenêtre entièrement
+# recouverte doit l'être.
+#reference
+#! --no-animations
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5
+wait-views 1 5000
+spawn client-essai --title deux --size 420x280 --color c0603a
+wait-views 2 5000
+wait 300
+expect-primary un yes
+expect-primary deux yes
+# « deux » maximisée recouvre entièrement « un »
+action <action name="Maximize"/>
+wait 300
+expect-primary un no
+expect-primary deux yes
+action <action name="Unmaximize"/>
+wait 300
+expect-primary un yes
+expect-primary deux yes
+# Réduite : plus affichée
+action <action name="Iconify"/>
+wait 300
+expect-primary deux no
+expect-primary un yes
+quit

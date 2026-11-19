@@ -30,6 +30,9 @@
 //! expect-shaded un yes   vérifie l'enroulement (yes/no)
 //! expect-visible un no   vérifie l'affichage (réduite, autre bureau…)
 //! expect-decorated un yes vérifie le cadre du compositeur
+//! expect-primary un yes  vérifie que la surface a un écran principal (elle
+//!                        reçoit un rappel de trame à chaque rendu de cet
+//!                        écran ; sinon un par seconde)
 //! expect-menu root-menu prefs   vérifie les menus ouverts (none: aucun)
 //! wait-menu 2 5000       attend 2 menus ouverts (pipemenus, 5 s au plus)
 //! point-menu Terminal    pointeur sur l'entrée de ce libellé
@@ -54,6 +57,7 @@ use std::time::{Duration, Instant};
 use smithay::input::keyboard::Keycode;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+use smithay::wayland::seat::WaylandFocus;
 use tracing::{info, warn};
 
 use crate::backend::Backend;
@@ -84,6 +88,7 @@ pub enum Step {
     ExpectShaded(String, bool),
     ExpectVisible(String, bool),
     ExpectDecorated(String, bool),
+    ExpectPrimary(String, bool),
     ExpectMenu(Vec<String>),
     WaitMenu(usize, u64),
     PointMenu(String),
@@ -157,7 +162,8 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 }
                 "move-by" => Step::MoveBy(num(args.next())?, num(args.next())?),
                 "mark" => Step::Mark(rest.to_string()),
-                "expect-moved" | "expect-grown" | "expect-shaded" | "expect-visible" | "expect-decorated" => {
+                "expect-moved" | "expect-grown" | "expect-shaded" | "expect-visible" | "expect-decorated"
+                | "expect-primary" => {
                     let v: Vec<&str> = rest.split_whitespace().collect();
                     let n = v.len();
                     if cmd == "expect-moved" || cmd == "expect-grown" {
@@ -181,6 +187,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                         match cmd {
                             "expect-shaded" => Step::ExpectShaded(t, b),
                             "expect-decorated" => Step::ExpectDecorated(t, b),
+                            "expect-primary" => Step::ExpectPrimary(t, b),
                             _ => Step::ExpectVisible(t, b),
                         }
                     }
@@ -439,6 +446,25 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                         None => fail(state, format!("pas de vue « {title} »")),
                     }
                 }
+                Step::ExpectPrimary(title, b) => {
+                    let surface = state
+                        .views
+                        .iter()
+                        .find(|v| v.title() == title)
+                        .and_then(|v| v.window.wl_surface().map(|s| s.into_owned()));
+                    match surface {
+                        Some(s) => {
+                            let primary = smithay::wayland::compositor::with_states(&s, |data| {
+                                smithay::desktop::utils::surface_primary_scanout_output(&s, data)
+                            });
+                            if primary.is_some() != b {
+                                let got = primary.map(|o| o.name()).unwrap_or_else(|| "aucun".into());
+                                fail(state, format!("« {title} »: écran principal {got}, attendu: {b}"));
+                            }
+                        }
+                        None => fail(state, format!("pas de vue « {title} »")),
+                    }
+                }
                 Step::ExpectDesktop(d) => {
                     if state.desktop + 1 != d {
                         fail(state, format!("bureau {} au lieu de {d}", state.desktop + 1));
@@ -635,6 +661,10 @@ mod tests {
             Step::Compare("a.png".into(), "ref/a.png".into(), 2)
         );
         assert!(parse("compare a.png").is_err());
+        assert_eq!(
+            parse("expect-primary un deux no").unwrap()[0],
+            Step::ExpectPrimary("un deux".into(), false)
+        );
     }
 
     #[test]

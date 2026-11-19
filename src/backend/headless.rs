@@ -103,10 +103,13 @@ fn render(state: &mut State) {
         captures,
         ..
     } = &mut h;
+    // États du rendu : écran principal de chaque surface, comme en udev
+    let mut states = None;
     match renderer.bind(target) {
         Ok(mut fb) => {
-            if let Err(e) = damage.render_output(renderer, &mut fb, 1, &elements, CLEAR.premultiplied()) {
-                warn!("rendu: {e:?}");
+            match damage.render_output(renderer, &mut fb, 1, &elements, CLEAR.premultiplied()) {
+                Ok(r) => states = Some(r.states),
+                Err(e) => warn!("rendu: {e:?}"),
             }
             for path in captures.drain(..) {
                 let region = Rectangle::from_size((size.w, size.h).into());
@@ -125,7 +128,7 @@ fn render(state: &mut State) {
         Err(e) => warn!("headless: {e:?}"),
     }
     state.backend = Some(Backend::Headless(h));
-    let feedback = after_render(state, &output, None);
+    let feedback = after_render(state, &output, states.as_ref());
     presented_now(state, &output, feedback);
 }
 
