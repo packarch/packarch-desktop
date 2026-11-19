@@ -9,6 +9,11 @@
   Recharger après une modification : Super+Maj+r.
 -->
 <packarch_config>
+  <core>
+    <!-- Logo de Packarch au centre du fond, caché par un fond d'écran
+         (swaybg…) ; no : fond uni -->
+    <logo>yes</logo>
+  </core>
   <theme>
     <!-- Un thème Openbox de /usr/share/themes ; vide : thème intégré -->
     <name></name>

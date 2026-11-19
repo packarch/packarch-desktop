@@ -9,6 +9,7 @@
   <core>
     <decoration>server</decoration>
     <gap>0</gap>
+    <logo>no</logo>
   </core>
   <placement>
     <policy>center</policy>

@@ -992,5 +992,20 @@ Décidé le 17 novembre 2026 :
     quitte la liste des transferts du gestionnaire X11 (sinon la demande
     suivante recevait un échec). Les applications winit 0.30 (eframe,
     egui) ne reçoivent pas de fichiers en Wayland natif : à lancer en X11.
+33. Configuration par défaut et bureau nu : sans `~/.config/packarch/rc.xml`,
+    `/etc/xdg/packarch` (installé avec packarch) donne un bureau utilisable
+    sans autre programme : menu au clic droit avec les applications
+    installées (menu `applications-menu`, généré d'après les fichiers
+    `.desktop` comme `client-list-combined-menu` l'est d'après les
+    fenêtres ; pas de programme générateur séparé), les fenêtres, un
+    terminal, la session (veille, redémarrage, arrêt par systemctl). Les
+    menus générés ne paraissent que là où un `menu.xml` les cite : le menu
+    de Packarch ne change pas. Fond : logo de Packarch
+    (`distributor-logo-packarch` de packarch-icons, cyan, intégré au
+    programme et rendu par resvg à 20 % de la hauteur de l'écran), dessiné
+    sous les couches de fond : un fond d'écran (swaybg) le cache.
+    `<core><logo>no</logo></core>` le retire, comme
+    `misc:disable_hyprland_logo` sous Hyprland. Les scénarios de référence
+    (tests/essai) le retirent.
 
 Aucune question ouverte pour l'instant.

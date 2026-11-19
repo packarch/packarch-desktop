@@ -199,6 +199,8 @@ pub struct Config {
     pub xwayland_persistence: bool,
     /// Clients X11 rendus à l'échelle de l'écran (nets) au lieu d'être agrandis
     pub xwayland_sharp: bool,
+    /// Logo de Packarch au centre du fond, sous les fonds d'écran
+    pub logo: bool,
     pub adaptive_sync: AdaptiveSync,
     pub placement: Placement,
     // theme
@@ -295,6 +297,7 @@ impl Default for Config {
             gap: 0,
             xwayland_persistence: false,
             xwayland_sharp: false,
+            logo: true,
             adaptive_sync: AdaptiveSync::No,
             placement: Placement::Automatic,
             theme_name: String::new(),
@@ -704,6 +707,7 @@ impl Config {
                 "gap" => r.int(c, &mut self.gap),
                 "xwaylandpersistence" => r.bool(c, &mut self.xwayland_persistence),
                 "xwaylandsharp" => r.bool(c, &mut self.xwayland_sharp),
+                "logo" => r.bool(c, &mut self.logo),
                 "adaptivesync" => match text(c).trim().to_ascii_lowercase().as_str() {
                     "fullscreen" => self.adaptive_sync = AdaptiveSync::Fullscreen,
                     v => match parse_bool(v) {

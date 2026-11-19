@@ -186,6 +186,8 @@ pub struct State {
     pub x11_drag: Option<smithay::wayland::selection::data_device::ForeignDnd<State>>,
     /// OSD affiché (Alt+Tab, nom du bureau) et celui qui disparaît
     pub osd: Option<crate::osd::Osd>,
+    /// Logo du fond (`<core><logo>`)
+    pub logo: crate::logo::Logo,
     pub osd_ghost: Option<crate::osd::OsdGhost>,
     /// Applications installées (fichiers .desktop)
     pub apps: crate::apps::Apps,
@@ -383,6 +385,7 @@ impl State {
             osd: None,
             osd_ghost: None,
             apps: crate::apps::Apps::default(),
+            logo: crate::logo::Logo::default(),
             desk_anim: None,
             cursors: None,
             xwayland: crate::xwayland::Xwayland {
