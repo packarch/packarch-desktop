@@ -32,7 +32,8 @@
 //! expect-decorated un yes vérifie le cadre du compositeur
 //! expect-primary un yes  vérifie que la surface a un écran principal (elle
 //!                        reçoit un rappel de trame à chaque rendu de cet
-//!                        écran ; sinon un par seconde)
+//!                        écran ; sinon un par seconde) ; no : aucun ;
+//!                        HEADLESS-2 : cet écran
 //! expect-menu root-menu prefs   vérifie les menus ouverts (none: aucun)
 //! wait-menu 2 5000       attend 2 menus ouverts (pipemenus, 5 s au plus)
 //! point-menu Terminal    pointeur sur l'entrée de ce libellé
@@ -64,6 +65,14 @@ use crate::backend::Backend;
 use crate::input::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
 use crate::state::State;
 
+/// Écran principal attendu d'une surface (`expect-primary`)
+#[derive(Debug, Clone, PartialEq)]
+pub enum Primary {
+    Yes,
+    No,
+    Output(String),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
     Spawn(String),
@@ -88,7 +97,7 @@ pub enum Step {
     ExpectShaded(String, bool),
     ExpectVisible(String, bool),
     ExpectDecorated(String, bool),
-    ExpectPrimary(String, bool),
+    ExpectPrimary(String, Primary),
     ExpectMenu(Vec<String>),
     WaitMenu(usize, u64),
     PointMenu(String),
@@ -162,8 +171,16 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 }
                 "move-by" => Step::MoveBy(num(args.next())?, num(args.next())?),
                 "mark" => Step::Mark(rest.to_string()),
-                "expect-moved" | "expect-grown" | "expect-shaded" | "expect-visible" | "expect-decorated"
-                | "expect-primary" => {
+                "expect-primary" => {
+                    let (title, want) = rest.rsplit_once(' ').ok_or("expect-primary TITRE yes|no|ÉCRAN")?;
+                    let want = match crate::config::parse_bool(want) {
+                        Some(true) => Primary::Yes,
+                        Some(false) => Primary::No,
+                        None => Primary::Output(want.to_string()),
+                    };
+                    Step::ExpectPrimary(title.trim().to_string(), want)
+                }
+                "expect-moved" | "expect-grown" | "expect-shaded" | "expect-visible" | "expect-decorated" => {
                     let v: Vec<&str> = rest.split_whitespace().collect();
                     let n = v.len();
                     if cmd == "expect-moved" || cmd == "expect-grown" {
@@ -187,7 +204,6 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                         match cmd {
                             "expect-shaded" => Step::ExpectShaded(t, b),
                             "expect-decorated" => Step::ExpectDecorated(t, b),
-                            "expect-primary" => Step::ExpectPrimary(t, b),
                             _ => Step::ExpectVisible(t, b),
                         }
                     }
@@ -446,7 +462,7 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                         None => fail(state, format!("pas de vue « {title} »")),
                     }
                 }
-                Step::ExpectPrimary(title, b) => {
+                Step::ExpectPrimary(title, want) => {
                     let surface = state
                         .views
                         .iter()
@@ -457,9 +473,18 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>) {
                             let primary = smithay::wayland::compositor::with_states(&s, |data| {
                                 smithay::desktop::utils::surface_primary_scanout_output(&s, data)
                             });
-                            if primary.is_some() != b {
-                                let got = primary.map(|o| o.name()).unwrap_or_else(|| "aucun".into());
-                                fail(state, format!("« {title} »: écran principal {got}, attendu: {b}"));
+                            let got = primary.map(|o| o.name());
+                            let ok = match &want {
+                                Primary::Yes => got.is_some(),
+                                Primary::No => got.is_none(),
+                                Primary::Output(name) => got.as_ref() == Some(name),
+                            };
+                            if !ok {
+                                let got = got.unwrap_or_else(|| "aucun".into());
+                                fail(
+                                    state,
+                                    format!("« {title} »: écran principal {got}, attendu: {want:?}"),
+                                );
                             }
                         }
                         None => fail(state, format!("pas de vue « {title} »")),
@@ -663,7 +688,11 @@ mod tests {
         assert!(parse("compare a.png").is_err());
         assert_eq!(
             parse("expect-primary un deux no").unwrap()[0],
-            Step::ExpectPrimary("un deux".into(), false)
+            Step::ExpectPrimary("un deux".into(), Primary::No)
+        );
+        assert_eq!(
+            parse("expect-primary un HEADLESS-2").unwrap()[0],
+            Step::ExpectPrimary("un".into(), Primary::Output("HEADLESS-2".into()))
         );
     }
 

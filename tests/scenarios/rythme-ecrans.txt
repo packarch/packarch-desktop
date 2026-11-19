@@ -1,0 +1,27 @@
+# Rythme des clients sur deux écrans (décision 24) : l'écran principal
+# d'une fenêtre est celui où elle est le plus visible ; elle n'en change
+# que si elle est au moins deux fois plus visible sur l'autre (Smithay),
+# pour ne pas osciller entre deux écrans.
+#reference
+#! --no-animations --outputs 2
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5
+wait-views 1 5000
+wait 200
+expect un 388 209 504 382
+expect-primary un HEADLESS-1
+# Entièrement sur le second écran
+action <action name="MoveRelative" x="1280" y="0"/>
+wait 200
+expect un 1668 209 504 382
+expect-primary un HEADLESS-2
+# À cheval, 300 px sur le premier, 200 sur le second : reste au second
+action <action name="MoveRelative" x="-690" y="0"/>
+wait 200
+expect un 978 209 504 382
+expect-primary un HEADLESS-2
+# 400 px sur le premier, 100 sur le second : passe au premier
+action <action name="MoveRelative" x="-100" y="0"/>
+wait 200
+expect-primary un HEADLESS-1
+quit

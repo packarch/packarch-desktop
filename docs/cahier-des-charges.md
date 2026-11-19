@@ -889,7 +889,10 @@ Décidé le 17 novembre 2026 :
     change d'identifiant à chaque image ; leurs surfaces sont ajoutées aux
     états du rendu avec la partie visible de la fenêtre sur l'écran. Sans
     cela elles passaient pour invisibles (un rappel par seconde : saisie et
-    sélection en retard).
+    sélection en retard). Scénarios `rythme` (fenêtre recouverte, réduite)
+    et `rythme-ecrans` (backend headless à deux écrans, option cachée
+    `--outputs 2` : écran principal d'une fenêtre à cheval) ; commande
+    `expect-primary TITRE yes|no|ÉCRAN`.
 25. Pointeur virtuel (wlr-virtual-pointer v2) : réservé aux clients de
     confiance, comme le clavier virtuel ; le siège demandé est ignoré (il
     n'y en a qu'un). Les événements suivent le chemin de la souris

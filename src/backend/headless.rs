@@ -23,87 +23,114 @@ use crate::state::State;
 
 pub struct Headless {
     pub renderer: GlesRenderer,
+    screens: Vec<Screen>,
+    /// Captures demandées (premier écran), faites après le prochain rendu
+    pub captures: Vec<PathBuf>,
+}
+
+/// Un écran sans affichage : sa texture et son suivi des dégâts
+struct Screen {
     output: Output,
     damage: OutputDamageTracker,
     target: GlesTexture,
     size: Size<i32, Physical>,
-    /// Captures demandées, faites après le prochain rendu
-    pub captures: Vec<PathBuf>,
 }
 
+/// `count` écrans de `size`, posés côte à côte de gauche à droite
+/// (HEADLESS-1, HEADLESS-2…)
 pub fn init(
     event_loop: &mut EventLoop<'static, State>,
     state: &mut State,
     size: (i32, i32),
     scale: f64,
+    count: usize,
 ) -> anyhow::Result<()> {
     // Sûr: l'affichage EGL vit aussi longtemps que le moteur de rendu
     let display = unsafe { EGLDisplay::new(EGLSurfacelessDisplay)? };
     let context = EGLContext::new(&display)?;
     let mut renderer = unsafe { GlesRenderer::new(context)? };
     let size: Size<i32, Physical> = size.into();
-    let target: GlesTexture = renderer.create_buffer(Fourcc::Abgr8888, (size.w, size.h).into())?;
     let mode = Mode {
         size,
         refresh: 60_000,
     };
-    let output = Output::new(
-        "HEADLESS-1".into(),
-        PhysicalProperties {
-            size: (0, 0).into(),
-            subpixel: Subpixel::Unknown,
-            make: "Packarch".into(),
-            model: "headless".into(),
-        },
-    );
-    let _global = output.create_global::<State>(&state.dh);
-    output.change_current_state(
-        Some(mode),
-        Some(Transform::Normal),
-        Some(Scale::Fractional(scale)),
-        Some((0, 0).into()),
-    );
-    output.set_preferred(mode);
-    state.outputs.push(output.clone());
+    let logical_w = (size.w as f64 / scale).round() as i32;
+    let mut screens = vec![];
+    for n in 0..count.max(1) {
+        let target: GlesTexture = renderer.create_buffer(Fourcc::Abgr8888, (size.w, size.h).into())?;
+        let output = Output::new(
+            format!("HEADLESS-{}", n + 1),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: "Packarch".into(),
+                model: "headless".into(),
+            },
+        );
+        let _global = output.create_global::<State>(&state.dh);
+        output.change_current_state(
+            Some(mode),
+            Some(Transform::Normal),
+            Some(Scale::Fractional(scale)),
+            Some((logical_w * n as i32, 0).into()),
+        );
+        output.set_preferred(mode);
+        state.outputs.push(output.clone());
+        let damage = OutputDamageTracker::from_output(&output);
+        screens.push(Screen {
+            output,
+            damage,
+            target,
+            size,
+        });
+    }
     init_renderer(state, &mut renderer);
-    let damage = OutputDamageTracker::from_output(&output);
-    info!("headless: {}×{}, échelle {scale}", size.w, size.h);
+    info!(
+        "headless: {} × {}×{}, échelle {scale}",
+        screens.len(),
+        size.w,
+        size.h
+    );
     state.backend = Some(Backend::Headless(Headless {
         renderer,
-        output,
-        damage,
-        target,
-        size,
+        screens,
         captures: vec![],
     }));
 
     event_loop
         .handle()
         .insert_source(Timer::immediate(), |_, _, state| {
-            render(state);
+            let count = match &state.backend {
+                Some(Backend::Headless(h)) => h.screens.len(),
+                _ => 0,
+            };
+            for i in 0..count {
+                render(state, i);
+            }
             TimeoutAction::ToDuration(Duration::from_micros(16_667))
         })
         .map_err(|e| anyhow::anyhow!("minuterie: {e}"))?;
     Ok(())
 }
 
-fn render(state: &mut State) {
+fn render(state: &mut State, i: usize) {
     let Some(Backend::Headless(mut h)) = state.backend.take() else {
         return;
     };
-    let output = h.output.clone();
+    let output = h.screens[i].output.clone();
     let mut elements = state.cursor_elements(&mut h.renderer, &output);
     let cursor = elements.len();
     elements.extend(output_elements(state, &mut h.renderer, &output));
     crate::protocols::capture(state, &mut h.renderer, &output, &elements, cursor);
     let Headless {
         renderer,
-        damage,
-        target,
-        size,
+        screens,
         captures,
-        ..
     } = &mut h;
+    let Screen {
+        damage, target, size, ..
+    } = &mut screens[i];
+    let captures = if i == 0 { std::mem::take(captures) } else { vec![] };
     // États du rendu : écran principal de chaque surface, comme en udev
     let mut states = None;
     match renderer.bind(target) {
@@ -116,7 +143,7 @@ fn render(state: &mut State) {
                 Ok(r) => states = Some(r.states),
                 Err(e) => warn!("rendu: {e:?}"),
             }
-            for path in captures.drain(..) {
+            for path in captures {
                 let region = Rectangle::from_size((size.w, size.h).into());
                 let pixels = renderer
                     .copy_framebuffer(&fb, region, Fourcc::Abgr8888)

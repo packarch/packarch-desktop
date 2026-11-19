@@ -78,6 +78,9 @@ struct Cli {
     /// Échelle de l'écran
     #[arg(long, hide = true, default_value_t = 1.0)]
     scale: f64,
+    /// Nombre d'écrans headless, côte à côte
+    #[arg(long, hide = true, default_value_t = 1)]
+    outputs: usize,
     /// Désactive les animations
     #[arg(long)]
     no_animations: bool,
@@ -181,7 +184,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 .split_once('x')
                 .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
                 .ok_or_else(|| anyhow::anyhow!("--size: LARGEURxHAUTEUR attendu"))?;
-            backend::headless::init(&mut event_loop, &mut state, (w, h), cli.scale)?
+            backend::headless::init(&mut event_loop, &mut state, (w, h), cli.scale, cli.outputs)?
         }
     }
 
