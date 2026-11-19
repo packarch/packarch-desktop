@@ -111,6 +111,7 @@ fn main() {
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_writer(std::io::stderr)
         .init();
+    panic_hook();
     if cli.reconfigure || cli.exit {
         let sig = if cli.exit { libc::SIGTERM } else { libc::SIGHUP };
         if let Err(e) = session::signal_instance(sig) {
@@ -123,6 +124,29 @@ fn main() {
         error!("{e:#}");
         std::process::exit(1);
     }
+}
+
+/// Panique (§ 13) : message, emplacement et trace d'appels dans le journal
+/// avant la sortie, pour en retrouver la cause dans packarch.log. La trace
+/// est toujours prise, quel que soit RUST_BACKTRACE (le binaire de
+/// publication garde les numéros de ligne).
+fn panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("(sans message)");
+        let place = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_default();
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("?");
+        let trace = std::backtrace::Backtrace::force_capture();
+        error!("panique dans le fil « {name} » : {msg} ({place})\n{trace}");
+    }));
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
