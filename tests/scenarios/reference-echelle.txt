@@ -9,7 +9,9 @@ wait-views 2 5000
 move 20 20
 wait 300
 capture 1-fenetres.png
-compare 1-fenetres.png ref/1-fenetres.png
+# Tolérance 1 : à l'échelle 1,5, quelques pixels d'ombre ou de coin
+# varient d'un niveau d'un rendu à l'autre
+compare 1-fenetres.png ref/1-fenetres.png 1
 combo 125 57
 wait-menu 1 2000
 move 20 20
