@@ -12,8 +12,9 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
-use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport};
-use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
+use smithay::backend::drm::{
+    DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
+};
 use smithay::backend::egl::{EGLContext, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
@@ -29,6 +30,7 @@ use smithay::reexports::calloop::{EventLoop, RegistrationToken};
 use smithay::reexports::drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc};
 use smithay::reexports::input::{self as libinput, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
+use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
 use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::utils::{DeviceFd, Time, Transform};
 use tracing::{debug, info, warn};
@@ -37,8 +39,12 @@ use super::{Backend, after_render, init_renderer, refresh_of};
 use crate::render::{CLEAR, output_elements};
 use crate::state::State;
 
-type Compositor =
-    DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, Option<OutputPresentationFeedback>, DrmDeviceFd>;
+type Compositor = DrmCompositor<
+    GbmAllocator<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
+    Option<OutputPresentationFeedback>,
+    DrmDeviceFd,
+>;
 
 /// Un écran branché
 struct Surface {
@@ -495,9 +501,10 @@ impl State {
         match s.compositor.frame_submitted() {
             Ok(Some(Some(mut feedback))) => {
                 let (time, seq, hw) = match meta {
-                    Some(DrmEventMetadata { time: DrmEventTime::Monotonic(t), sequence }) if !t.is_zero() => {
-                        (Time::from(*t), *sequence as u64, true)
-                    }
+                    Some(DrmEventMetadata {
+                        time: DrmEventTime::Monotonic(t),
+                        sequence,
+                    }) if !t.is_zero() => (Time::from(*t), *sequence as u64, true),
                     _ => (now, 0, false),
                 };
                 let flags = if hw {
@@ -595,9 +602,7 @@ impl State {
         self.backend = Some(Backend::Udev(u));
         let feedback = after_render(self, &output, states.as_ref());
         let mut queued = false;
-        if changed
-            && let Some(s) = self.udev().and_then(|u| u.surfaces.get_mut(&crtc))
-        {
+        if changed && let Some(s) = self.udev().and_then(|u| u.surfaces.get_mut(&crtc)) {
             match s.compositor.queue_frame(Some(feedback)) {
                 Ok(()) => queued = true,
                 // Changement de console: l'accès à l'écran est retiré juste
