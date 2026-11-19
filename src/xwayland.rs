@@ -637,8 +637,13 @@ impl XwmHandler for State {
     // --- Presse-papiers: X11 → Wayland --------------------------------
 
     fn allow_selection_access(&mut self, _xwm: XwmId, _selection: SelectionTarget) -> bool {
-        // Une application X11 au premier plan peut lire le presse-papiers
-        self.focused_view().is_some_and(|i| self.views[i].x11().is_some())
+        // Tout client X11 peut lire le presse-papiers, comme sous X11, sway
+        // ou KWin (décision 34) : aussi ceux qui n'ont pas de fenêtre au
+        // premier plan, comme spice-vdagent (copier depuis une machine
+        // virtuelle) ou un gestionnaire de presse-papiers X11. Smithay ne
+        // dit pas quel client demande : réserver la lecture à l'application
+        // au premier plan les bloquait tous.
+        true
     }
 
     fn send_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_type: String, fd: OwnedFd) {

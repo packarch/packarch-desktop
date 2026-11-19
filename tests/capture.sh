@@ -13,7 +13,8 @@
 #
 # Une ligne « #reference » rend le scénario indépendant de la machine:
 # configuration figée de tests/essai (thème Essai, sans fond ni barre),
-# clients de test (examples/client-essai.rs, pointeur-essai.rs, dans le
+# clients de test (examples/client-essai.rs, pointeur-essai.rs,
+# presse-papiers-x11.rs ; wl-copy de wl-clipboard ; dans le
 # PATH), et
 # les étapes « compare X ref/X » comparent les captures aux images de
 # tests/references/NOM. --update remplace ces images par les captures.

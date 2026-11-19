@@ -1008,5 +1008,16 @@ Décidé le 17 novembre 2026 :
     `<core><logo>no</logo></core>` le retire, comme
     `misc:disable_hyprland_logo` sous Hyprland. Les scénarios de référence
     (tests/essai) le retirent.
+34. Presse-papiers Wayland → X11 : tout client X11 peut lire le
+    presse-papiers (`allow_selection_access`), comme sous X11, sway ou
+    KWin. Le réserver à l'application X11 au premier plan bloquait les
+    clients X11 sans fenêtre : spice-vdagent (copier depuis une machine
+    virtuelle vers l'hôte), gestionnaires de presse-papiers, scripts ;
+    Smithay ne dit pas quel client demande, donc pas de règle plus fine.
+    `X11Wm::new_selection` envoie aussitôt le changement de propriétaire de
+    la sélection (patch `vendor/smithay` : `flush`) : avant, il attendait le
+    prochain événement X11 traité, et un client qui lisait tout de suite
+    trouvait une sélection sans propriétaire. Scénario
+    `tests/scenarios/presse-papiers.txt` (client `presse-papiers-x11`).
 
 Aucune question ouverte pour l'instant.

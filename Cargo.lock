@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "packarch-desktop"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "anyhow",
  "calloop 0.14.5",
@@ -1464,6 +1464,7 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-server",
+ "x11rb",
  "xcursor",
 ]
 

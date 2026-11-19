@@ -1285,6 +1285,10 @@ impl X11Wm {
             self.conn
                 .set_selection_owner(x11rb::NONE, selection.atom, selection.timestamp)?;
         }
+        // packarch: sent now, not at the next X11 event handled by the WM: the
+        // X clients (spice-vdagent, clipboard managers) must see the new owner
+        // before they read the selection
+        self.conn.flush()?;
 
         Ok(())
     }

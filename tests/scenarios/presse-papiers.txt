@@ -1,0 +1,12 @@
+# Presse-papiers Wayland → X11 (décision 34) : un texte copié par un client
+# Wayland (wl-copy, wlr-data-control) est lu aussitôt par un client X11 sans
+# fenêtre au premier plan (presse-papiers-x11, comme spice-vdagent d'une
+# machine virtuelle ou un gestionnaire de presse-papiers X11).
+#reference
+#! --no-animations
+wait 500
+spawn sh -c 'printf essai-wayland | wl-copy'
+wait 500
+spawn sh -c 'test "$(presse-papiers-x11)" = essai-wayland && touch presse-papiers-ok'
+expect-file presse-papiers-ok 4000
+quit
