@@ -45,6 +45,8 @@ pub struct DnDGrab<D: SeatHandler> {
     icon: Option<WlSurface>,
     origin: WlSurface,
     seat: Seat<D>,
+    /// packarch: `current_focus` is a foreign surface (XWayland)
+    foreign: bool,
 }
 
 impl<D: SeatHandler + 'static> fmt::Debug for DnDGrab<D> {
@@ -84,6 +86,7 @@ impl<D: SeatHandler> DnDGrab<D> {
             origin,
             icon,
             seat,
+            foreign: false,
         }
     }
 
@@ -106,6 +109,7 @@ impl<D: SeatHandler> DnDGrab<D> {
             origin,
             icon,
             seat,
+            foreign: false,
         }
     }
 }
@@ -116,7 +120,45 @@ where
     D: SeatHandler,
     D: 'static,
 {
+    /// packarch: foreign surfaces (XWayland) get the drag from the
+    /// compositor, the others from their `wl_data_device`
     fn update_focus<F: WaylandFocus>(
+        &mut self,
+        data: &mut D,
+        focus: Option<(F, Point<f64, Logical>)>,
+        location: Point<f64, Logical>,
+        serial: Serial,
+        time: u32,
+    ) {
+        if let Some(source) = self.data_source.clone() {
+            let target = focus
+                .as_ref()
+                .and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), *loc)));
+            if self.foreign {
+                if let Some((s, loc)) = target
+                    .as_ref()
+                    .filter(|(s, _)| Some(s) == self.current_focus.as_ref())
+                {
+                    data.foreign_dnd_motion(&source, Some((s, location - *loc)));
+                    return;
+                }
+                data.foreign_dnd_motion(&source, None);
+                self.current_focus = None;
+                self.foreign = false;
+            }
+            if let Some((s, loc)) = target.filter(|(s, _)| data.foreign_dnd_target(s)) {
+                // leave the previous surface
+                self.update_focus_inner(None::<(F, Point<f64, Logical>)>, location, serial, time);
+                data.foreign_dnd_motion(&source, Some((&s, location - loc)));
+                self.current_focus = Some(s);
+                self.foreign = true;
+                return;
+            }
+        }
+        self.update_focus_inner(focus, location, serial, time);
+    }
+
+    fn update_focus_inner<F: WaylandFocus>(
         &mut self,
         focus: Option<(F, Point<f64, Logical>)>,
         location: Point<f64, Logical>,
@@ -225,6 +267,20 @@ where
     }
 
     fn drop(&mut self, data: &mut D) {
+        // packarch: drop on a foreign surface (XWayland)
+        if self.foreign {
+            if let Some(source) = self.data_source.clone() {
+                let validated = data.foreign_dnd_drop(&source);
+                if !validated {
+                    source.cancelled();
+                } else if source.version() >= wl_data_source::EVT_DND_DROP_PERFORMED_SINCE {
+                    source.dnd_drop_performed();
+                }
+                ClientDndGrabHandler::dropped(data, self.current_focus.clone(), validated, self.seat.clone());
+                self.icon = None;
+                return;
+            }
+        }
         // the user dropped, proceed to the drop
         let seat_data = self
             .seat
@@ -294,7 +350,7 @@ where
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
 
-        self.update_focus(focus, event.location, event.serial, event.time);
+        self.update_focus(data, focus, event.location, event.serial, event.time);
     }
 
     fn relative_motion(
@@ -438,7 +494,7 @@ where
 
     fn motion(
         &mut self,
-        _data: &mut D,
+        data: &mut D,
         _handle: &mut crate::input::touch::TouchInnerHandle<'_, D>,
         focus: Option<(<D as SeatHandler>::TouchFocus, Point<f64, Logical>)>,
         event: &crate::input::touch::MotionEvent,
@@ -448,7 +504,7 @@ where
             return;
         }
 
-        self.update_focus(focus, event.location, SERIAL_COUNTER.next_serial(), event.time);
+        self.update_focus(data, focus, event.location, SERIAL_COUNTER.next_serial(), event.time);
     }
 
     fn frame(

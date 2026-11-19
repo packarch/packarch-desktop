@@ -557,6 +557,8 @@ fichiers) ; le compositeur fournit les protocoles qu'ils demandent
 - Mise à l'échelle : par défaut, les clients X11 sont rendus à l'échelle 1
   puis agrandis (flou acceptable). Avec `<core><xwaylandSharp>yes`, ils
   sont rendus à la plus grande échelle des écrans et restent nets (§ 15).
+- Glisser-déposer entre clients Wayland et X11, dans les deux sens
+  (XDND, décision 32).
 
 ---
 
@@ -966,5 +968,25 @@ Décidé le 17 novembre 2026 :
     et la NVIDIA (processeur). Encodage : le pilote VA-API de NVIDIA
     refuse les images RVB, wf-recorder s'y enregistre en NVENC
     (`-c h264_nvenc`, capture shm), pas en `h264_vaapi`.
+32. Glisser-déposer entre Wayland et X11 (XDND 5) : Smithay 0.7.0 ne
+    relaie que les presse-papiers ; patch `vendor/smithay`. Wayland →
+    X11 : le gestionnaire X11 possède `XdndSelection` (types de la source,
+    `XdndTypeList`) et envoie `XdndEnter`, `XdndPosition`, `XdndDrop` ou
+    `XdndLeave` à la fenêtre X11 sous le pointeur (`XdndAware`,
+    `XdndProxy`) ; la saisie DnD de Smithay laisse au compositeur les
+    surfaces de XWayland. Les données sont lues dans la source Wayland ;
+    `XdndStatus` donne la cible et l'action (copie de préférence : un
+    déplacement effacerait le fichier du gestionnaire de fichiers),
+    `XdndFinished` termine la source. X11 → Wayland : quand un client X11
+    possède `XdndSelection`, qu'un bouton est enfoncé sur une fenêtre X11
+    et que le pointeur passe au-dessus d'une surface Wayland, une fenêtre
+    mandataire (InputOnly, override-redirect, couvrant l'écran) est placée
+    devant les fenêtres X11 ; elle reçoit les messages XDND, et le
+    compositeur présente le glisser au client Wayland par une offre
+    `wl_data_offer` sans saisie du pointeur (le pointeur reste au client
+    X11 qui glisse). Elle est cachée au relâchement. Les fenêtres X11 non
+    gérées (icône du glisser qui suit le pointeur) sont ignorées pour
+    trouver la surface Wayland visée. Vérifié sans écran : GTK 3 Wayland
+    vers GTK 3 X11 et Swing (FileBot), GTK 3 X11 vers GTK 3 Wayland.
 
 Aucune question ouverte pour l'instant.

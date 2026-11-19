@@ -513,6 +513,8 @@ impl State {
             },
         );
         pointer.frame(self);
+        // Glisser-déposer d'un client X11 vers une surface Wayland
+        self.update_dnd_proxy();
         // Glissement: liaisons Drag (Move, Resize…)
         let start_drag = self.press.as_ref().is_some_and(|p| {
             let d = pos - p.location;
@@ -639,6 +641,7 @@ impl State {
         }
         // Relâche
         let press = self.press.take_if(|p| p.button == mbutton);
+        self.update_dnd_proxy();
         for v in &mut self.views {
             v.pressed = None;
         }

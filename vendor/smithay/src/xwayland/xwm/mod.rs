@@ -140,6 +140,8 @@ use x11rb::{
 
 pub mod settings;
 use settings::{NameError, Value, XSettings};
+// packarch: drag'n'drop between Wayland and X11 (XDND)
+mod dnd;
 mod surface;
 pub use self::surface::*;
 
@@ -216,6 +218,23 @@ mod atoms {
             INCR,
             DELETE,
             _XSETTINGS_S0,
+
+            // packarch: drag'n'drop (XDND)
+            XdndSelection,
+            XdndAware,
+            XdndProxy,
+            XdndTypeList,
+            XdndActionList,
+            XdndEnter,
+            XdndPosition,
+            XdndStatus,
+            XdndLeave,
+            XdndDrop,
+            XdndFinished,
+            XdndActionCopy,
+            XdndActionMove,
+            XdndActionAsk,
+            XdndActionPrivate,
         }
     }
 }
@@ -387,6 +406,67 @@ pub trait XwmHandler {
         let _ = (xwm, selection);
     }
 
+    /// packarch: an X client reads the data of the Wayland drag'n'drop
+    /// (see [`X11Wm::dnd_source`]) in the given mime type
+    fn send_dnd_data(&mut self, xwm: XwmId, mime_type: String, fd: OwnedFd) {
+        let _ = (xwm, mime_type, fd);
+    }
+
+    /// packarch: the X window under a Wayland drag accepts it or not
+    /// (`XdndStatus`), with the action it chose
+    fn dnd_target_status(
+        &mut self,
+        xwm: XwmId,
+        accepted: bool,
+        action: wayland_server::protocol::wl_data_device_manager::DndAction,
+    ) {
+        let _ = (xwm, accepted, action);
+    }
+
+    /// packarch: the X window a Wayland drag was dropped on is done with it
+    /// (`XdndFinished`)
+    fn dnd_target_finished(
+        &mut self,
+        xwm: XwmId,
+        success: bool,
+        action: wayland_server::protocol::wl_data_device_manager::DndAction,
+    ) {
+        let _ = (xwm, success, action);
+    }
+
+    /// packarch: an X drag entered the proxy window (pointer over Wayland
+    /// surfaces, see [`X11Wm::set_dnd_proxy`])
+    fn x11_drag_enter(
+        &mut self,
+        xwm: XwmId,
+        mime_types: Vec<String>,
+        actions: wayland_server::protocol::wl_data_device_manager::DndAction,
+    ) {
+        let _ = (xwm, mime_types, actions);
+    }
+
+    /// packarch: an X drag moved over the proxy window (global logical
+    /// position); answer with [`X11Wm::x11_drag_status`]
+    fn x11_drag_motion(
+        &mut self,
+        xwm: XwmId,
+        location: Point<f64, Logical>,
+        action: wayland_server::protocol::wl_data_device_manager::DndAction,
+    ) {
+        let _ = (xwm, location, action);
+    }
+
+    /// packarch: an X drag left the proxy window
+    fn x11_drag_leave(&mut self, xwm: XwmId) {
+        let _ = xwm;
+    }
+
+    /// packarch: an X drag was dropped on the proxy window; answer with
+    /// [`X11Wm::x11_drag_finished`] once the data were read
+    fn x11_drag_drop(&mut self, xwm: XwmId) {
+        let _ = xwm;
+    }
+
     /// The primary output of the randr protocol state was updated
     fn randr_primary_output_change(&mut self, xwm: XwmId, output_name: Option<String>) {
         let _ = (xwm, output_name);
@@ -415,6 +495,9 @@ pub struct X11Wm {
     _xfixes_data: QueryExtensionReply,
     clipboard: XWmSelection,
     primary: XWmSelection,
+    // packarch: XdndSelection and drag'n'drop state
+    dnd: XWmSelection,
+    xdnd: dnd::XDnd,
 
     pub(crate) windows: Vec<X11Surface>,
     // oldest mapped -> newest
@@ -433,10 +516,49 @@ impl Drop for X11Wm {
     }
 }
 
+/// packarch: kind of a selection handled by the XWM; `XdndSelection` carries
+/// drag'n'drop data
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelKind {
+    Clipboard,
+    Primary,
+    Dnd,
+}
+
+impl SelKind {
+    fn target(self) -> Option<SelectionTarget> {
+        match self {
+            SelKind::Clipboard => Some(SelectionTarget::Clipboard),
+            SelKind::Primary => Some(SelectionTarget::Primary),
+            SelKind::Dnd => None,
+        }
+    }
+}
+
+impl From<SelectionTarget> for SelKind {
+    fn from(t: SelectionTarget) -> Self {
+        match t {
+            SelectionTarget::Clipboard => SelKind::Clipboard,
+            SelectionTarget::Primary => SelKind::Primary,
+        }
+    }
+}
+
+/// packarch: selection of the given kind (macro: fields borrowed separately)
+macro_rules! sel {
+    ($xwm:expr, $kind:expr) => {
+        match $kind {
+            SelKind::Clipboard => &mut $xwm.clipboard,
+            SelKind::Primary => &mut $xwm.primary,
+            SelKind::Dnd => &mut $xwm.dnd,
+        }
+    };
+}
+
 #[derive(Debug)]
 struct XWmSelection {
     atom: Atom,
-    type_: SelectionTarget,
+    kind: SelKind,
 
     conn: Arc<RustConnection>,
     window: X11Window,
@@ -613,8 +735,9 @@ impl XWmSelection {
         conn.flush()?;
 
         let selection = match atom {
-            x if x == atoms.CLIPBOARD => SelectionTarget::Clipboard,
-            x if x == atoms.PRIMARY => SelectionTarget::Primary,
+            x if x == atoms.CLIPBOARD => SelKind::Clipboard,
+            x if x == atoms.PRIMARY => SelKind::Primary,
+            x if x == atoms.XdndSelection => SelKind::Dnd,
             _ => unreachable!(),
         };
 
@@ -627,7 +750,7 @@ impl XWmSelection {
 
         Ok(XWmSelection {
             atom,
-            type_: selection,
+            kind: selection,
             conn: conn.clone(),
             window,
             owner: window,
@@ -885,6 +1008,8 @@ impl X11Wm {
 
         let clipboard = XWmSelection::new(&conn, &screen, &atoms, atoms.CLIPBOARD)?;
         let primary = XWmSelection::new(&conn, &screen, &atoms, atoms.PRIMARY)?;
+        let dnd = XWmSelection::new(&conn, &screen, &atoms, atoms.XdndSelection)?;
+        let xdnd = dnd::XDnd::new(&conn, &screen, &atoms)?;
 
         drop(_guard);
         let wm = Self {
@@ -899,6 +1024,8 @@ impl X11Wm {
             _xfixes_data,
             clipboard,
             primary,
+            dnd,
+            xdnd,
             unpaired_surfaces: Default::default(),
             sequences_to_ignore: Default::default(),
             windows: Vec::new(),
@@ -1173,14 +1300,30 @@ impl X11Wm {
     where
         D: XwmHandler + 'static,
     {
+        self.send_selection_impl(selection.into(), mime_type, fd, loop_handle)
+    }
+
+    /// packarch: transfer of a selection of any kind (also `XdndSelection`)
+    fn send_selection_impl<D>(
+        &mut self,
+        kind: SelKind,
+        mime_type: String,
+        fd: OwnedFd,
+        loop_handle: LoopHandle<'_, D>,
+    ) -> Result<(), SelectionError>
+    where
+        D: XwmHandler + 'static,
+    {
         let xwm_id = self.id();
-        let selection = match selection {
-            SelectionTarget::Clipboard => &mut self.clipboard,
-            SelectionTarget::Primary => &mut self.primary,
+        // Drop time of an X11 drag (XDND), current time otherwise
+        let time = match kind {
+            SelKind::Dnd => self.xdnd.drop_time(),
+            _ => x11rb::CURRENT_TIME,
         };
+        let selection = sel!(self, kind);
 
         info!(
-            selection = ?selection.type_,
+            selection = ?selection.kind,
             ?mime_type,
             "Send request from XWayland",
         );
@@ -1188,6 +1331,14 @@ impl X11Wm {
         let atom = match &*mime_type {
             "text/plain;charset=utf-8" => self.atoms.UTF8_STRING,
             "text/plain" => self.atoms.TEXT,
+            // packarch: XDND types are given by the drag source, not TARGETS
+            x if kind == SelKind::Dnd => {
+                self.conn
+                    .intern_atom(false, x.as_bytes())?
+                    .reply_unchecked()?
+                    .ok_or(SelectionError::UnableToDetermineAtom)?
+                    .atom
+            }
             x => {
                 let prop = self
                     .conn
@@ -1237,14 +1388,14 @@ impl X11Wm {
             selection.atom,
             atom,
             self.atoms._WL_SELECTION,
-            x11rb::CURRENT_TIME,
+            time,
         )?;
 
         if let Err(err) = rustix::fs::fcntl_setfl(&fd, OFlags::WRONLY | OFlags::NONBLOCK) {
             warn!(?err, "Failed to restrict wl file descriptor");
         }
 
-        let selection_type = selection.type_;
+        let selection_type = selection.kind;
         let loop_handle_clone = loop_handle.clone();
         let token = loop_handle
             .insert_source(
@@ -1253,10 +1404,7 @@ impl X11Wm {
                     let xwm = data.xwm_state(xwm_id);
                     let conn = &xwm.conn;
                     let atoms = &xwm.atoms;
-                    let selection = match selection_type {
-                        SelectionTarget::Clipboard => &mut xwm.clipboard,
-                        SelectionTarget::Primary => &mut xwm.primary,
-                    };
+                    let selection = sel!(xwm, selection_type);
                     if let Some(transfer) = selection
                         .incoming
                         .iter_mut()
@@ -1433,6 +1581,9 @@ where
                 || xwm.clipboard.incoming.iter().any(|i| n.window == i.window)
                 || n.window == xwm.primary.window
                 || xwm.primary.incoming.iter().any(|i| n.window == i.window)
+                || n.window == xwm.dnd.window
+                || xwm.dnd.incoming.iter().any(|i| n.window == i.window)
+                || n.window == xwm.xdnd.proxy
             {
                 return Ok(());
             }
@@ -1736,6 +1887,10 @@ where
                     .any(|t| t.request.requestor == n.window)
             {
                 Some(&mut xwm.primary)
+            } else if xwm.dnd.incoming.iter().any(|t| t.window == n.window)
+                || xwm.dnd.outgoing.iter().any(|t| t.request.requestor == n.window)
+            {
+                Some(&mut xwm.dnd)
             } else {
                 None
             } {
@@ -1766,6 +1921,14 @@ where
             }
         }
         Event::XfixesSelectionNotify(n) => {
+            // packarch: owner of XdndSelection (drag source), no TARGETS query
+            if n.selection == xwm.atoms.XdndSelection {
+                xwm.dnd.owner = n.owner;
+                if n.owner == xwm.dnd.window {
+                    xwm.dnd.timestamp = n.timestamp;
+                }
+                return Ok(());
+            }
             let selection = match n.selection {
                 x if x == xwm.atoms.CLIPBOARD => &mut xwm.clipboard,
                 x if x == xwm.atoms.PRIMARY => &mut xwm.primary,
@@ -1780,7 +1943,9 @@ where
 
             if n.owner == x11rb::NONE && selection.owner != selection.window {
                 // A real X clients selection went away, not our proxy
-                let selection = selection.type_;
+                let Some(selection) = selection.kind.target() else {
+                    return Ok(());
+                };
                 drop(_guard);
                 state.cleared_selection(xwm_id, selection);
                 return Ok(());
@@ -1799,6 +1964,7 @@ where
             let selection = match n.selection {
                 x if x == xwm.atoms.CLIPBOARD => &mut xwm.clipboard,
                 x if x == xwm.atoms.PRIMARY => &mut xwm.primary,
+                x if x == xwm.atoms.XdndSelection => &mut xwm.dnd,
                 _ => return Ok(()),
             };
 
@@ -1857,7 +2023,9 @@ where
                                     })
                                     .collect::<Result<Vec<String>, _>>()?;
 
-                                let selection = selection.type_;
+                                let Some(selection) = selection.kind.target() else {
+                                    return Ok(());
+                                };
                                 drop(_guard);
                                 state.new_selection(xwm_id, selection, mime_types);
                             }
@@ -1905,8 +2073,9 @@ where
         }
         Event::SelectionRequest(n) => {
             let selection_type = match n.selection {
-                x if x == xwm.atoms.CLIPBOARD => xwm.clipboard.type_,
-                x if x == xwm.atoms.PRIMARY => xwm.primary.type_,
+                x if x == xwm.atoms.CLIPBOARD => xwm.clipboard.kind,
+                x if x == xwm.atoms.PRIMARY => xwm.primary.kind,
+                x if x == xwm.atoms.XdndSelection => xwm.dnd.kind,
                 _ => {
                     warn!(
                         target = ?n.selection,
@@ -1919,12 +2088,13 @@ where
 
             // work around borrowing
             drop(_guard);
-            let allow_access = state.allow_selection_access(xwm_id, selection_type);
-            let xwm = state.xwm_state(xwm_id);
-            let selection = match selection_type {
-                SelectionTarget::Clipboard => &mut xwm.clipboard,
-                SelectionTarget::Primary => &mut xwm.primary,
+            // packarch: the drop target of a drag reads its data
+            let allow_access = match selection_type.target() {
+                Some(target) => state.allow_selection_access(xwm_id, target),
+                None => true,
             };
+            let xwm = state.xwm_state(xwm_id);
+            let selection = sel!(xwm, selection_type);
 
             let _guard = xwm.span.enter();
             if n.requestor == selection.window {
@@ -2057,10 +2227,7 @@ where
                             Generic::new(recv_fd, Interest::READ, Mode::Level),
                             move |_, fd, data| {
                                 let xwm = data.xwm_state(xwm_id);
-                                let selection = match selection_type {
-                                    SelectionTarget::Clipboard => &mut xwm.clipboard,
-                                    SelectionTarget::Primary => &mut xwm.primary,
-                                };
+                                let selection = sel!(xwm, selection_type);
 
                                 if let Some(transfer) = selection
                                     .outgoing
@@ -2098,7 +2265,7 @@ where
                         };
 
                         debug!(
-                            selection = ?selection.type_,
+                            selection = ?selection.kind,
                             requestor = n.requestor,
                             ?mime_type,
                             "Created outgoing transfer",
@@ -2115,9 +2282,12 @@ where
                         };
                         selection.outgoing.push(transfer);
 
-                        let selection_type = selection.type_;
+                        let selection_type = selection.kind;
                         drop(_guard);
-                        state.send_selection(xwm_id, selection_type, mime_type, send_fd);
+                        match selection_type.target() {
+                            Some(target) => state.send_selection(xwm_id, target, mime_type, send_fd),
+                            None => state.send_dnd_data(xwm_id, mime_type, send_fd),
+                        }
                     }
                 }
             } else {
@@ -2131,6 +2301,8 @@ where
                     Some(&mut xwm.clipboard)
                 } else if xwm.primary.incoming.iter().any(|t| t.window == n.window) {
                     Some(&mut xwm.primary)
+                } else if xwm.dnd.incoming.iter().any(|t| t.window == n.window) {
+                    Some(&mut xwm.dnd)
                 } else {
                     None
                 } {
@@ -2192,6 +2364,13 @@ where
                     .any(|t| t.incr && t.request.requestor == n.window && t.request.property == n.atom)
                 {
                     Some(&mut xwm.primary)
+                } else if xwm
+                    .dnd
+                    .outgoing
+                    .iter()
+                    .any(|t| t.incr && t.request.requestor == n.window && t.request.property == n.atom)
+                {
+                    Some(&mut xwm.dnd)
                 } else {
                     None
                 } {
@@ -2259,6 +2438,11 @@ where
                     message = ?msg,
                     "got X11 client event message",
                 );
+            }
+            // packarch: drag'n'drop messages
+            if dnd::is_xdnd_message(&xwm.atoms, msg.type_) {
+                drop(_guard);
+                return dnd::handle_message(state, xwm_id, msg);
             }
             match msg.type_ {
                 x if x == xwm.atoms.WL_SURFACE_ID => {

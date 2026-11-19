@@ -180,6 +180,10 @@ pub struct State {
     /// Icône d'un glisser-déposer en cours (wl_data_device.start_drag),
     /// dessinée sous le pointeur, et son décalage cumulé (wl_surface.offset)
     pub dnd_icon: Option<(WlSurface, smithay::utils::Point<i32, smithay::utils::Logical>)>,
+    /// Source d'un glisser-déposer Wayland, lue par les clients X11 (XDND)
+    pub dnd_source: Option<smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource>,
+    /// Glisser-déposer d'un client X11 au-dessus des surfaces Wayland
+    pub x11_drag: Option<smithay::wayland::selection::data_device::ForeignDnd<State>>,
     /// OSD affiché (Alt+Tab, nom du bureau) et celui qui disparaît
     pub osd: Option<crate::osd::Osd>,
     pub osd_ghost: Option<crate::osd::OsdGhost>,
@@ -373,6 +377,8 @@ impl State {
             cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
             cursor_hotspot: None,
             dnd_icon: None,
+            dnd_source: None,
+            x11_drag: None,
             monotonic: smithay::utils::Clock::new(),
             osd: None,
             osd_ghost: None,
@@ -546,8 +552,15 @@ impl State {
 
     /// Ce qui se trouve au point `p` (coordonnées globales)
     pub fn under(&self, p: Point<f64, Logical>) -> Under {
+        self.under_with(p, true)
+    }
+
+    /// Comme `under`; `unmanaged` faux: sans les fenêtres X11 non gérées
+    /// (l'icône d'un glisser-déposer X11 suit le pointeur)
+    pub fn under_with(&self, p: Point<f64, Logical>, unmanaged: bool) -> Under {
         let output = self.output_at(p);
-        if !self.is_locked()
+        if unmanaged
+            && !self.is_locked()
             && let Some((s, loc)) = self.unmanaged_under(p)
         {
             return Under::Layer(s, loc, false);

@@ -452,12 +452,35 @@ impl DataDeviceHandler for State {
 }
 
 impl ClientDndGrabHandler for State {
-    fn started(&mut self, _source: Option<WlDataSource>, icon: Option<WlSurface>, _seat: Seat<Self>) {
+    fn started(&mut self, source: Option<WlDataSource>, icon: Option<WlSurface>, _seat: Seat<Self>) {
         self.dnd_icon = icon.map(|s| (s, Point::from((0, 0))));
+        self.start_dnd_source(source);
     }
 
-    fn dropped(&mut self, _target: Option<WlSurface>, _validated: bool, _seat: Seat<Self>) {
+    fn dropped(&mut self, target: Option<WlSurface>, validated: bool, _seat: Seat<Self>) {
         self.dnd_icon = None;
+        // Déposé sur une fenêtre X11: la source reste jusqu'à XdndFinished
+        let on_x11 = target.is_some_and(|t| self.is_xwayland_surface(&t));
+        if !(validated && on_x11) {
+            self.end_dnd_source();
+        }
+    }
+
+    // Fenêtres X11: le glisser-déposer passe par XDND (xwayland.rs)
+    fn foreign_dnd_target(&mut self, surface: &WlSurface) -> bool {
+        self.is_xwayland_surface(surface)
+    }
+
+    fn foreign_dnd_motion(
+        &mut self,
+        source: &WlDataSource,
+        target: Option<(&WlSurface, Point<f64, smithay::utils::Logical>)>,
+    ) {
+        self.dnd_over_x11(source, target.map(|(s, _)| s));
+    }
+
+    fn foreign_dnd_drop(&mut self, _source: &WlDataSource) -> bool {
+        self.dnd_drop_on_x11()
     }
 }
 impl ServerDndGrabHandler for State {}

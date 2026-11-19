@@ -18,11 +18,14 @@ use smithay::desktop::Window;
 use smithay::desktop::utils::under_from_surface_tree;
 use smithay::input::Seat;
 use smithay::reexports::wayland_server::Client;
+use smithay::reexports::wayland_server::Resource;
+use smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction;
+use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::selection::data_device::{
-    clear_data_device_selection, current_data_device_selection_userdata,
-    request_data_device_client_selection, set_data_device_selection,
+    ForeignDnd, ForeignDndHandler, clear_data_device_selection, current_data_device_selection_userdata,
+    request_data_device_client_selection, set_data_device_selection, with_source_metadata,
 };
 use smithay::wayland::selection::primary_selection::{
     clear_primary_selection, current_primary_selection_userdata, request_primary_client_selection,
@@ -226,6 +229,110 @@ impl State {
                 std::thread::spawn(move || child.wait());
             }
             Err(e) => tracing::debug!("xrdb: {e}"),
+        }
+    }
+
+    // --- Glisser-déposer entre Wayland et X11 (XDND) ------------------
+
+    /// Surface d'un client X11 (servie par XWayland)
+    pub fn is_xwayland_surface(&self, surface: &WlSurface) -> bool {
+        self.xwayland
+            .client
+            .as_ref()
+            .is_some_and(|c| surface.client().as_ref() == Some(c))
+    }
+
+    /// Fenêtre X11 d'une surface
+    fn x11_of_surface(&self, surface: &WlSurface) -> Option<X11Surface> {
+        self.views
+            .iter()
+            .filter_map(|v| v.x11())
+            .chain(self.xwayland.unmanaged.iter())
+            .find(|x| x.wl_surface().as_ref() == Some(surface))
+            .cloned()
+    }
+
+    /// Un glisser-déposer Wayland commence: ses types sont annoncés aux
+    /// clients X11 (XdndSelection)
+    pub fn start_dnd_source(&mut self, source: Option<WlDataSource>) {
+        self.dnd_source = source;
+        let mime_types = self
+            .dnd_source
+            .as_ref()
+            .and_then(|s| with_source_metadata(s, |m| m.mime_types.clone()).ok());
+        if let Some(mime_types) = mime_types
+            && let Some(wm) = self.xwayland.wm.as_mut()
+            && let Err(e) = wm.dnd_source(Some(mime_types))
+        {
+            warn!("glisser-déposer vers X11: {e}");
+        }
+    }
+
+    /// Fin du glisser-déposer Wayland
+    pub fn end_dnd_source(&mut self) {
+        self.dnd_source = None;
+        if let Some(wm) = self.xwayland.wm.as_mut() {
+            let _ = wm.dnd_source(None);
+        }
+    }
+
+    /// Le glisser-déposer Wayland passe sur une fenêtre X11 (`None`: il en
+    /// sort)
+    pub fn dnd_over_x11(&mut self, source: &WlDataSource, surface: Option<&WlSurface>) {
+        let actions = with_source_metadata(source, |m| m.dnd_action).unwrap_or(DndAction::Copy);
+        let window = surface.and_then(|s| self.x11_of_surface(s));
+        let location = self.pointer;
+        if let Some(wm) = self.xwayland.wm.as_mut()
+            && let Err(e) = wm.dnd_motion(window.as_ref(), location, actions)
+        {
+            warn!("glisser-déposer vers X11: {e}");
+        }
+    }
+
+    /// Dépôt sur une fenêtre X11: vrai si elle l'accepte
+    pub fn dnd_drop_on_x11(&mut self) -> bool {
+        self.xwayland
+            .wm
+            .as_mut()
+            .is_some_and(|wm| wm.dnd_drop().unwrap_or(false))
+    }
+
+    /// Fenêtre mandataire XDND: un client X11 glisse (bouton enfoncé sur
+    /// une fenêtre X11) et le pointeur est au-dessus d'une surface Wayland.
+    /// Placée devant les fenêtres X11, elle reçoit les messages XDND
+    pub fn update_dnd_proxy(&mut self) {
+        let Some(wm) = self.xwayland.wm.as_ref() else {
+            return;
+        };
+        let pointer = self.seat.get_pointer().unwrap();
+        let dragging = wm.x11_drag_active()
+            && self.press.is_some()
+            && pointer
+                .current_focus()
+                .is_some_and(|s| self.is_xwayland_surface(&s));
+        let shown = dragging
+            && match self.under_with(self.pointer, false) {
+                crate::state::Under::View(_, s, _) | crate::state::Under::Layer(s, _, _) => {
+                    !self.is_xwayland_surface(&s)
+                }
+                _ => false,
+            };
+        if let Some(wm) = self.xwayland.wm.as_mut()
+            && let Err(e) = wm.set_dnd_proxy(shown)
+        {
+            warn!("glisser-déposer depuis X11: {e}");
+        }
+    }
+
+    /// Surface Wayland (pas X11) au point `p` et position locale
+    fn wayland_surface_at(&self, p: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
+        match self.under_with(p, false) {
+            crate::state::Under::View(_, s, loc) | crate::state::Under::Layer(s, loc, _)
+                if !self.is_xwayland_surface(&s) =>
+            {
+                Some((s, p - loc))
+            }
+            _ => None,
         }
     }
 
@@ -570,8 +677,77 @@ impl XwmHandler for State {
         }
     }
 
+    // --- Glisser-déposer: Wayland → X11 --------------------------------
+
+    fn send_dnd_data(&mut self, _xwm: XwmId, mime_type: String, fd: OwnedFd) {
+        use std::os::fd::AsFd;
+        if let Some(source) = self.dnd_source.as_ref().filter(|s| s.is_alive()) {
+            source.send(mime_type, fd.as_fd());
+        }
+    }
+
+    fn dnd_target_status(&mut self, _xwm: XwmId, accepted: bool, action: DndAction) {
+        let Some(source) = self.dnd_source.as_ref().filter(|s| s.is_alive()) else {
+            return;
+        };
+        // Retour au client source (curseur « interdit » ou non)
+        let mime = with_source_metadata(source, |m| m.mime_types.first().cloned())
+            .ok()
+            .flatten();
+        source.target(if accepted { mime } else { None });
+        if accepted && source.version() >= 3 {
+            source.action(action);
+        }
+    }
+
+    fn dnd_target_finished(&mut self, _xwm: XwmId, success: bool, _action: DndAction) {
+        if let Some(source) = self.dnd_source.take().filter(|s| s.is_alive()) {
+            if !success {
+                source.cancelled();
+            } else if source.version() >= 3 {
+                source.dnd_finished();
+            }
+        }
+        self.end_dnd_source();
+    }
+
+    // --- Glisser-déposer: X11 → Wayland --------------------------------
+
+    fn x11_drag_enter(&mut self, _xwm: XwmId, mime_types: Vec<String>, actions: DndAction) {
+        if let Some(mut old) = self.x11_drag.take() {
+            old.leave();
+        }
+        self.x11_drag = Some(ForeignDnd::new(&self.dh, &self.seat, mime_types, actions));
+    }
+
+    fn x11_drag_motion(&mut self, _xwm: XwmId, location: Point<f64, Logical>, _action: DndAction) {
+        let target = self.wayland_surface_at(location);
+        let time = self.start.elapsed().as_millis() as u32;
+        if let Some(drag) = self.x11_drag.as_mut() {
+            drag.motion(target.as_ref().map(|(s, l)| (s, *l)), time);
+        }
+    }
+
+    fn x11_drag_leave(&mut self, _xwm: XwmId) {
+        if let Some(mut drag) = self.x11_drag.take() {
+            drag.leave();
+        }
+    }
+
+    fn x11_drag_drop(&mut self, _xwm: XwmId) {
+        let accepted = self.x11_drag.take().is_some_and(|mut d| d.drop());
+        if let Some(wm) = self.xwayland.wm.as_mut() {
+            if !accepted {
+                let _ = wm.x11_drag_finished(false, DndAction::empty());
+            }
+            let _ = wm.set_dnd_proxy(false);
+        }
+    }
+
     fn disconnected(&mut self, _xwm: XwmId) {
         warn!("XWayland déconnecté");
+        self.dnd_source = None;
+        self.x11_drag = None;
         self.xwayland.wm = None;
         self.xwayland.client = None;
         self.xwayland.unmanaged.clear();
@@ -608,6 +784,31 @@ impl SelectionHandler for State {
             && let Err(e) = wm.send_selection(ty, mime_type, fd, handle)
         {
             warn!("presse-papiers depuis X11: {e}");
+        }
+    }
+}
+
+// --- Glisser-déposer: X11 → Wayland (réponses du client Wayland) --------
+
+impl ForeignDndHandler for State {
+    fn foreign_dnd_status(&mut self, accepted: bool, action: DndAction) {
+        if let Some(wm) = self.xwayland.wm.as_mut() {
+            let _ = wm.x11_drag_status(accepted, action);
+        }
+    }
+
+    fn foreign_dnd_receive(&mut self, mime_type: String, fd: OwnedFd) {
+        let handle = self.handle.clone();
+        if let Some(wm) = self.xwayland.wm.as_mut()
+            && let Err(e) = wm.x11_drag_receive(mime_type, fd, handle)
+        {
+            warn!("glisser-déposer depuis X11: {e}");
+        }
+    }
+
+    fn foreign_dnd_finished(&mut self, success: bool, action: DndAction) {
+        if let Some(wm) = self.xwayland.wm.as_mut() {
+            let _ = wm.x11_drag_finished(success, action);
         }
     }
 }
