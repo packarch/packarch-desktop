@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "packarch-desktop"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "anyhow",
  "calloop 0.14.5",
