@@ -725,7 +725,7 @@ packarch [OPTIONS]
   référence (décision 16). Cas : menu racine ouvert, sous-menu, Alt+Tab,
   fenêtre maximisée, coins et ombres à l'échelle 1 et 1,5, rythme des
   clients sur un et deux écrans, pointeur virtuel, capture d'écran et de
-  fenêtre par grim.
+  fenêtre par grim, capture dans un dmabuf (`dmabuf-essai`).
 - **Essais réels** : sur la machine de développement en session imbriquée
   (winit), puis sur packarch-test en session complète.
 - **CI** : `cargo fmt --check`, `cargo clippy -- -D warnings`,
@@ -953,5 +953,18 @@ Décidé le 17 novembre 2026 :
     écrans. `PACKARCH_PARTAGE_MENU` : autre menu dmenu (choix d'après le
     texte de la ligne) ; `--liste` : les lignes, sans menu. Scénario
     `partage` (faux menu, puis grim sur la réponse).
+31. Capture dans un dmabuf que le moteur ne sait pas dessiner : sur
+    NVIDIA, un dmabuf linéaire n'est accepté par EGL qu'en lecture
+    (« external only ») ; wf-recorder en alloue un (XR24, linéaire) pour
+    wlr-screencopy, qui n'annonce que le format, et la copie échouait
+    (« Failed to bind Framebuffer », wf-recorder réessayant sans fin). Si
+    le format et le modificateur ne sont pas parmi les formats de rendu
+    EGL, un dmabuf linéaire à un plan est rempli par le processeur
+    (projection en mémoire, `DMA_BUF_IOCTL_SYNC`), comme un tampon shm ;
+    autre cas : échec. Client de test `dmabuf-essai` (tampon GBM
+    linéaire, PNG à comparer à grim) ; identique à grim sur l'AMD (GPU)
+    et la NVIDIA (processeur). Encodage : le pilote VA-API de NVIDIA
+    refuse les images RVB, wf-recorder s'y enregistre en NVENC
+    (`-c h264_nvenc`, capture shm), pas en `h264_vaapi`.
 
 Aucune question ouverte pour l'instant.

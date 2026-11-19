@@ -61,6 +61,9 @@ name = "pointeur-essai"
 [[example]]
 name = "fenetres-essai"
 
+[[example]]
+name = "dmabuf-essai"
+
 [profile.release]
 debug = "line-tables-only"
 

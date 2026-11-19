@@ -13,7 +13,8 @@
 
 use std::sync::Mutex;
 
-use smithay::backend::allocator::{Buffer, Fourcc};
+use smithay::backend::allocator::dmabuf::{DmabufMappingMode, DmabufSyncFlags};
+use smithay::backend::allocator::{Buffer, Fourcc, Modifier};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::RenderElement;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTarget, GlesTexture};
@@ -140,48 +141,96 @@ fn write_buffer(
     buffer: &WlBuffer,
 ) -> anyhow::Result<()> {
     if let Ok(dmabuf) = smithay::wayland::dmabuf::get_dmabuf(buffer) {
-        // Copie terminée avant que le client ne lise le tampon
-        let mut dmabuf = dmabuf.clone();
-        let mut dst = renderer.bind(&mut dmabuf)?;
-        renderer.blit(
-            fb,
-            &mut dst,
-            region,
-            Rectangle::from_size(region.size),
-            TextureFilter::Nearest,
-        )?;
-        renderer.with_context(|gl| unsafe { gl.Finish() })?;
+        let renderable = renderer
+            .egl_context()
+            .dmabuf_render_formats()
+            .contains(&dmabuf.format());
+        if renderable {
+            // Copie terminée avant que le client ne lise le tampon
+            let mut dmabuf = dmabuf.clone();
+            let mut dst = renderer.bind(&mut dmabuf)?;
+            renderer.blit(
+                fb,
+                &mut dst,
+                region,
+                Rectangle::from_size(region.size),
+                TextureFilter::Nearest,
+            )?;
+            renderer.with_context(|gl| unsafe { gl.Finish() })?;
+            return Ok(());
+        }
+        // Tampon que le moteur ne sait pas dessiner : sur NVIDIA, un dmabuf
+        // linéaire n'est accepté qu'en lecture (wf-recorder en alloue un).
+        // Copie par le processeur, le tampon mappé en mémoire
+        if dmabuf.format().modifier != Modifier::Linear || dmabuf.num_planes() != 1 {
+            anyhow::bail!("dmabuf {:?} : format non dessinable", dmabuf.format());
+        }
+        let pixels = read_region(renderer, fb, region)?;
+        let stride = dmabuf.strides().next().unwrap_or(0) as usize;
+        // La projection commence à l'offset du plan
+        let map = dmabuf.map_plane(0, DmabufMappingMode::WRITE)?;
+        dmabuf.sync_plane(0, DmabufSyncFlags::START | DmabufSyncFlags::WRITE)?;
+        // Sûr : projection valide jusqu'à sa destruction, à la fin de la fonction
+        let dst = unsafe { std::slice::from_raw_parts_mut(map.ptr().cast::<u8>(), map.length()) };
+        let ok = copy_pixels(&pixels, region.size, dst, 0, stride);
+        dmabuf.sync_plane(0, DmabufSyncFlags::END | DmabufSyncFlags::WRITE)?;
+        if !ok {
+            anyhow::bail!("dmabuf trop petit");
+        }
         return Ok(());
     }
-    let area = Rectangle::new(
-        (region.loc.x, region.loc.y).into(),
-        (region.size.w, region.size.h).into(),
-    );
-    let mapping = renderer.copy_framebuffer(fb, area, Fourcc::Abgr8888)?;
-    let pixels = renderer.map_texture(&mapping)?;
+    let pixels = read_region(renderer, fb, region)?;
     let written = smithay::wayland::shm::with_buffer_contents_mut(buffer, |ptr, len, b| {
-        let w = region.size.w as usize;
-        let need = b.offset as usize + b.stride as usize * (region.size.h as usize - 1) + w * 4;
-        if need > len || pixels.len() < w * 4 * region.size.h as usize {
-            return false;
-        }
-        for y in 0..region.size.h as usize {
-            let src = &pixels[y * w * 4..(y + 1) * w * 4];
-            // Sûr: la taille du tampon a été vérifiée ci-dessus
-            let dst = unsafe {
-                std::slice::from_raw_parts_mut(ptr.add(b.offset as usize + y * b.stride as usize), w * 4)
-            };
-            // RVBA → BVRX (xrgb8888 petit-boutiste)
-            for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
-                *d = [s[2], s[1], s[0], 255];
-            }
-        }
-        true
+        // Sûr : zone du tampon donnée par Smithay
+        let dst = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+        copy_pixels(&pixels, region.size, dst, b.offset as usize, b.stride as usize)
     });
     match written {
         Ok(true) => Ok(()),
         _ => anyhow::bail!("tampon shm trop petit"),
     }
+}
+
+/// Pixels de `region` dans l'image liée `fb`, en RVBA
+fn read_region(
+    renderer: &mut GlesRenderer,
+    fb: &GlesTarget<'_>,
+    region: Rectangle<i32, Physical>,
+) -> anyhow::Result<Vec<u8>> {
+    let area = Rectangle::new(
+        (region.loc.x, region.loc.y).into(),
+        (region.size.w, region.size.h).into(),
+    );
+    let mapping = renderer.copy_framebuffer(fb, area, Fourcc::Abgr8888)?;
+    Ok(renderer.map_texture(&mapping)?.to_vec())
+}
+
+/// Écrit les pixels RVBA dans `dst` en xrgb8888, ligne après ligne à partir
+/// de `offset` ; faux si `dst` est trop petit
+fn copy_pixels(
+    pixels: &[u8],
+    size: Size<i32, Physical>,
+    dst: &mut [u8],
+    offset: usize,
+    stride: usize,
+) -> bool {
+    let (w, h) = (size.w as usize, size.h as usize);
+    if h == 0 {
+        return true;
+    }
+    let need = offset + stride * (h - 1) + w * 4;
+    if stride < w * 4 || need > dst.len() || pixels.len() < w * 4 * h {
+        return false;
+    }
+    for y in 0..h {
+        let src = &pixels[y * w * 4..(y + 1) * w * 4];
+        let line = &mut dst[offset + y * stride..offset + y * stride + w * 4];
+        // RVBA → BVRX (xrgb8888 petit-boutiste)
+        for (d, s) in line.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
+            *d = [s[2], s[1], s[0], 255];
+        }
+    }
+    true
 }
 
 /// Copie d'un écran demandée par un client
