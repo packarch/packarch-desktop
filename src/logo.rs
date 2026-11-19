@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Logo de Packarch au centre du fond (option `<core><logo>`): dessiné
+//! Logo pacman au centre du fond (option `<core><logo>`): dessiné
 //! sous les couches de fond, donc caché dès qu'un programme pose un fond
 //! d'écran (swaybg…). Le SVG est intégré au programme et rendu à la taille
 //! exacte de chaque écran.
@@ -11,8 +11,8 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::utils::{Logical, Point, Rectangle, Size, Transform};
 
-/// Logo de Packarch (distributor-logo-packarch, cyan, de packarch-icons)
-const SVG: &[u8] = include_bytes!("../data/packarch-logo.svg");
+/// Pacman et trois pastilles, d'une teinte à peine plus claire que le fond
+const SVG: &[u8] = include_bytes!("../data/logo.svg");
 
 /// Hauteur du logo, en fraction de la hauteur de l'écran
 const HEIGHT: f64 = 0.2;
@@ -72,9 +72,10 @@ mod tests {
     fn logo() {
         let pm = super::render(216).unwrap();
         assert_eq!(pm.height(), 216);
-        assert!(pm.width() > 150 && pm.width() <= 216);
-        // Pointe du A en haut au centre, coins transparents
-        assert!(pm.pixels().iter().any(|p| p.alpha() == 255));
+        assert_eq!(pm.width(), 378);
+        // Corps du pacman plein, bouche et coins transparents
+        assert_eq!(pm.pixel(80, 108).unwrap().alpha(), 255);
+        assert_eq!(pm.pixel(160, 108).unwrap().alpha(), 0);
         assert_eq!(pm.pixel(0, 0).unwrap().alpha(), 0);
     }
 }

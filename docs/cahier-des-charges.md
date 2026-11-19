@@ -1000,9 +1000,10 @@ Décidé le 17 novembre 2026 :
     fenêtres ; pas de programme générateur séparé), les fenêtres, un
     terminal, la session (veille, redémarrage, arrêt par systemctl). Les
     menus générés ne paraissent que là où un `menu.xml` les cite : le menu
-    de Packarch ne change pas. Fond : logo de Packarch
-    (`distributor-logo-packarch` de packarch-icons, cyan, intégré au
-    programme et rendu par resvg à 20 % de la hauteur de l'écran), dessiné
+    de Packarch ne change pas. Fond : pacman et trois pastilles
+    (`data/logo.svg`, dessiné pour packarch, sans couleur, à peine plus
+    clair que le fond : `#26262d` sur `#1a1a1f` ; intégré au programme et
+    rendu par resvg à 20 % de la hauteur de l'écran), dessiné
     sous les couches de fond : un fond d'écran (swaybg) le cache.
     `<core><logo>no</logo></core>` le retire, comme
     `misc:disable_hyprland_logo` sous Hyprland. Les scénarios de référence
