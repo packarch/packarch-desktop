@@ -1,6 +1,6 @@
 [package]
 name = "packarch-desktop"
-version = "1.4.4"
+version = "1.4.5"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Compositeur Wayland à fenêtres flottantes de Packarch"
