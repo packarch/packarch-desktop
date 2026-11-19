@@ -1,0 +1,27 @@
+# Sélecteur du partage d'écran (packarch-partage, décision 30) : il liste
+# les écrans et les fenêtres, et rend au portail « Monitor: NOM » ou
+# « Window: IDENTIFIANT ». Un faux menu (grep) choisit la ligne ; grim
+# capture ensuite ce que le sélecteur a rendu.
+#reference
+#! --no-animations
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5
+wait-views 1 5000
+spawn client-essai --title deux --size 420x280 --color c0603a
+wait-views 2 5000
+move 20 20
+wait 300
+spawn sh -c 'packarch-partage --liste > liste.txt'
+expect-file liste.txt 3000
+# Une fenêtre
+spawn sh -c 'PACKARCH_PARTAGE_MENU="grep -m1 deux" packarch-partage > choix-fenetre.txt && grim -T "$(sed -n "s/^Window: //p" choix-fenetre.txt)" fenetre.png'
+compare fenetre.png ref/fenetre.png
+# Un écran
+capture interne.png
+expect-file interne.png 3000
+spawn sh -c 'PACKARCH_PARTAGE_MENU="grep -m1 Écran" packarch-partage > choix-ecran.txt && grim -c -o "$(sed -n "s/^Monitor: //p" choix-ecran.txt)" ecran.png'
+compare ecran.png interne.png
+# Annulé : rien sur la sortie
+spawn sh -c 'PACKARCH_PARTAGE_MENU="true" packarch-partage > annule.txt; touch annule-fini'
+expect-file annule-fini 3000
+quit

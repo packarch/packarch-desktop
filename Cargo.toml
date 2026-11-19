@@ -10,6 +10,11 @@ publish = false
 name = "packarch"
 path = "src/main.rs"
 
+# Sélecteur du partage d'écran (xdg-desktop-portal-wlr)
+[[bin]]
+name = "packarch-partage"
+path = "src/bin/packarch-partage.rs"
+
 [dependencies]
 smithay = { version = "0.7.0", default-features = false, features = [
     "backend_winit",
@@ -34,9 +39,10 @@ anyhow = "1"
 libc = "0.2"
 calloop = { version = "0.14", features = ["signals"] }
 resvg = { version = "0.49", default-features = false, features = ["raster-images"] }
-wayland-protocols = { version = "0.32.13", features = ["server", "staging"] }
+wayland-protocols = { version = "0.32.13", features = ["server", "client", "staging"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["server"] }
 wayland-server = "0.31"
+wayland-client = "0.31"
 xcursor = "0.3"
 
 # Clients de test des scénarios (tests/capture.sh) : fenêtre d'une couleur

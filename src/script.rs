@@ -46,7 +46,7 @@
 //! clock-advance 50       l'avance de 50 ms
 //! clock-run              la remet en marche
 //! capture /tmp/a.png     capture de l'écran (backend headless)
-//! compare a.png ref/a.png 2   attend la capture (3 s au plus) et la compare
+//! compare a.png ref/a.png 2   attend la capture lisible (3 s au plus) et la compare
 //!                        à l'image de référence : chaque composante à
 //!                        2 niveaux près au plus (0 par défaut)
 //! quit
@@ -592,7 +592,9 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>, min_tolerance:
                 Step::Compare(got, reference, tolerance) => {
                     // La capture est écrite au rendu suivant
                     let start = *waiting_since.get_or_insert_with(Instant::now);
-                    if std::fs::metadata(&got).is_err() && start.elapsed() < Duration::from_secs(3) {
+                    // Ou encore en cours d'écriture par un client (grim) :
+                    // illisible jusqu'à la fin
+                    if read_png(&got).is_err() && start.elapsed() < Duration::from_secs(3) {
                         return TimeoutAction::ToDuration(Duration::from_millis(50));
                     }
                     waiting_since = None;

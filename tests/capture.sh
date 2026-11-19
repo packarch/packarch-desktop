@@ -56,7 +56,7 @@ for scenario in "$@"; do
 		read -ra opts <<<"$(sed -n 's/^#! //p' "$scenario")"
 		opts+=("${logiciel[@]}")
 		if (cd "$out" && XDG_DATA_HOME="$root/tests/essai/data" XKB_DEFAULT_LAYOUT=us \
-			PATH="$root/target/debug/examples:$PATH" \
+			PATH="$root/target/debug/examples:$root/target/debug:$PATH" \
 			"$root/target/debug/packarch" --backend headless -C "$out/cfg" "${opts[@]}" \
 			--script "$scenario" >"$out/journal.txt" 2>&1); then
 			echo "   réussi, captures dans $out"

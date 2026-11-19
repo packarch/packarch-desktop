@@ -542,7 +542,9 @@ priorité 3, § 15).
 Pas de portail intégré. Packarch installe `xdg-desktop-portal-wlr` (capture
 d'écran, partage d'écran dans Firefox) et `xdg-desktop-portal-gtk` (choix de
 fichiers) ; le compositeur fournit les protocoles qu'ils demandent
-(screencopy, output) et un fichier `packarch-portals.conf`.
+(screencopy, ext-image-copy-capture, output), un fichier
+`packarch-portals.conf`, et le sélecteur du partage d'écran
+`packarch-partage` (un écran ou une seule fenêtre, décision 30).
 
 ### 9.4 XWayland
 
@@ -940,5 +942,16 @@ Décidé le 17 novembre 2026 :
     (`DRM_MODE_PAGE_FLIP_ASYNC`), sans lequel tearing-control (§ 9.2)
     n'aurait aucun effet : protocole non proposé. À revoir à la
     prochaine version de Smithay.
+30. Sélecteur du partage d'écran : `packarch-partage` (programme du
+    paquet), lancé par xdg-desktop-portal-wlr (`chooser_type=simple`,
+    fichier `/etc/xdg/xdg-desktop-portal-wlr/packarch`, lu grâce à
+    `XDG_CURRENT_DESKTOP=packarch:wlroots`). Il liste les écrans
+    (wl_output v4 : nom, description) et les fenêtres
+    (ext-foreign-toplevel-list : titre, app_id) dans `rofi -dmenu`, et
+    rend `Monitor: NOM` ou `Window: IDENTIFIANT` ; rien si l'utilisateur
+    annule. Sans lui, le sélecteur par défaut (slurp) ne proposait que les
+    écrans. `PACKARCH_PARTAGE_MENU` : autre menu dmenu (choix d'après le
+    texte de la ligne) ; `--liste` : les lignes, sans menu. Scénario
+    `partage` (faux menu, puis grim sur la réponse).
 
 Aucune question ouverte pour l'instant.

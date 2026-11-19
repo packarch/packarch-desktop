@@ -129,6 +129,19 @@ fichier
 .I packarch/themerc
 ou
 .IR openbox\-3/themerc .
+.PP
+Partage d'écran :
+.I /etc/xdg/xdg\-desktop\-portal\-wlr/packarch
+(remplacé par
+.IR ~/.config/xdg\-desktop\-portal\-wlr/packarch )
+fait choisir par
+.B packarch\-partage
+un écran entier ou une seule fenêtre, dans
+.BR rofi .
+.B packarch\-partage \-\-liste
+écrit les écrans et les fenêtres proposés ;
+.B PACKARCH_PARTAGE_MENU
+donne un autre menu de type dmenu.
 .SH CONFIGURATION
 Sections de
 .IR rc.xml :
@@ -323,6 +336,7 @@ Quitte proprement.
 .BR swayidle (1),
 .BR grim (1),
 .BR wlr\-randr (1),
-.BR wlopm (1).
+.BR wlopm (1),
+.BR xdg\-desktop\-portal\-wlr (5).
 .PP
 Le cahier des charges du projet décrit le comportement attendu en détail.
