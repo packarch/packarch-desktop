@@ -931,5 +931,13 @@ Décidé le 17 novembre 2026 :
     de Mesa (llvmpipe) : `tests/capture.sh --logiciel` et `tests/ci.sh
     --logiciel` le choisissent et tolèrent 2 niveaux d'écart avec les
     références, faites sur un GPU (option cachée `--tolerance N`).
+29. Attendu de Smithay (vérifié le 19 novembre 2026 : 0.7.0 reste la
+    dernière version publiée, et la branche principale n'a rien de
+    nouveau sur ces points) : point chaud du plan curseur (décision 18,
+    patch `vendor/smithay` maintenu), XWayland à la demande (décision 12),
+    xdg-toplevel-icon (décision 11), et page flip asynchrone
+    (`DRM_MODE_PAGE_FLIP_ASYNC`), sans lequel tearing-control (§ 9.2)
+    n'aurait aucun effet : protocole non proposé. À revoir à la
+    prochaine version de Smithay.
 
 Aucune question ouverte pour l'instant.
