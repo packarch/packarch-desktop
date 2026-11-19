@@ -826,7 +826,12 @@ Décidé le 17 novembre 2026 :
     `#reference`, références dans `tests/references`, écart nul exigé par
     défaut (le rendu headless est déterministe), `tests/capture.sh --update`
     pour les refaire. Les captures dépendent des polices installées : les
-    références se refont sur une autre machine.
+    références se refont sur une autre machine. Une capture est rendue en
+    entier : un rendu partiel laissait des pixels d'une image précédente
+    dont les bords lissés différaient d'un niveau selon le rythme des
+    clients (captures variables d'une exécution à l'autre). Script
+    `tests/ci.sh` : formatage, clippy sans avertissement, tests, licences
+    (`cargo deny`) et scénarios de référence.
 
 17. Cadre des fenêtres (comme labwc) : le mode demandé par le client
     (xdg-decoration, décoration KDE de GTK3) est respecté ; une application
