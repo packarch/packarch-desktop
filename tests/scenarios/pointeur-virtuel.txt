@@ -1,0 +1,22 @@
+# Pointeur virtuel (wlr-virtual-pointer, § 9.2) : client de test
+# pointeur-essai. « un » (504 × 382 au centre) est sous « deux » ; un clic
+# sur la partie visible de « un » lui donne le focus, un glissé de sa barre
+# de titre la déplace.
+#reference
+#! --no-animations
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5
+wait-views 1 5000
+spawn client-essai --title deux --size 420x280 --color c0603a
+wait-views 2 5000
+wait 200
+expect un 388 209 504 382
+expect-focus deux
+spawn pointeur-essai abs 400 400 1280 800 press release
+wait 500
+expect-focus un
+mark un
+spawn pointeur-essai abs 400 220 1280 800 press rel 20 10 rel 30 20 release scroll 1
+wait 500
+expect-moved un 50 30
+quit

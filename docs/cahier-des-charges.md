@@ -890,5 +890,12 @@ Décidé le 17 novembre 2026 :
     états du rendu avec la partie visible de la fenêtre sur l'écran. Sans
     cela elles passaient pour invisibles (un rappel par seconde : saisie et
     sélection en retard).
+25. Pointeur virtuel (wlr-virtual-pointer v2) : réservé aux clients de
+    confiance, comme le clavier virtuel ; le siège demandé est ignoré (il
+    n'y en a qu'un). Les événements suivent le chemin de la souris
+    (liaisons, contraintes, mouvement brut pour relative-pointer). Un
+    mouvement absolu couvre l'écran donné à la création, sinon le rectangle
+    de tous les écrans ; la molette est transmise au `frame`. Scénario
+    `pointeur-virtuel`, client de test `pointeur-essai`.
 
 Aucune question ouverte pour l'instant.

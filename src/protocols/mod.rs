@@ -7,6 +7,7 @@
 pub mod foreign_toplevel;
 pub mod outputs;
 pub mod screencopy;
+pub mod virtual_pointer;
 pub mod workspace;
 
 use std::sync::Arc;
@@ -106,6 +107,7 @@ impl Protocols {
         handle: &smithay::reexports::calloop::LoopHandle<'static, State>,
         primary: &smithay::wayland::selection::primary_selection::PrimarySelectionState,
     ) -> Protocols {
+        virtual_pointer::init(dh);
         Protocols {
             session_lock: SessionLockManagerState::new::<State, _>(dh, trusted),
             idle_notifier: IdleNotifierState::new(dh, handle.clone()),

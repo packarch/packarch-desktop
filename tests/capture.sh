@@ -12,7 +12,8 @@
 #
 # Une ligne « #reference » rend le scénario indépendant de la machine:
 # configuration figée de tests/essai (thème Essai, sans fond ni barre),
-# fenêtres du client de test (examples/client-essai.rs, dans le PATH), et
+# clients de test (examples/client-essai.rs, pointeur-essai.rs, dans le
+# PATH), et
 # les étapes « compare X ref/X » comparent les captures aux images de
 # tests/references/NOM. --update remplace ces images par les captures.
 set -euo pipefail
@@ -25,7 +26,7 @@ fi
 (($#)) || set -- "$root"/tests/scenarios/*.txt
 src="$HOME/.config/packarch"
 cargo build --quiet --manifest-path "$root/Cargo.toml"
-cargo build --quiet --manifest-path "$root/Cargo.toml" --example client-essai
+cargo build --quiet --manifest-path "$root/Cargo.toml" --examples
 status=0
 for scenario in "$@"; do
 	scenario="$(realpath "$scenario")"
