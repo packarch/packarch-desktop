@@ -1,0 +1,20 @@
+# Capture d'écran (wlr-screencopy, § 9.2) par grim : écran entier avec le
+# curseur, identique à la capture interne ; région ; sans le curseur.
+#reference
+#! --no-animations
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5
+wait-views 1 5000
+spawn client-essai --title deux --size 420x280 --color c0603a
+wait-views 2 5000
+move 20 20
+wait 300
+capture interne.png
+expect-file interne.png 3000
+spawn grim -c grim.png
+compare grim.png interne.png
+spawn grim -c -g "350,180 300x200" region.png
+compare region.png ref/region.png
+spawn grim sans-curseur.png
+compare sans-curseur.png ref/sans-curseur.png
+quit

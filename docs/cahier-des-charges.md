@@ -897,5 +897,14 @@ Décidé le 17 novembre 2026 :
     mouvement absolu couvre l'écran donné à la création, sinon le rectangle
     de tous les écrans ; la molette est transmise au `frame`. Scénario
     `pointeur-virtuel`, client de test `pointeur-essai`.
+26. Capture d'écran (wlr-screencopy v3) : tampons shm (relus par le
+    processeur) ou dmabuf `XRGB8888`/`ARGB8888` (copiés par le GPU : wf-recorder
+    avec un encodeur matériel, xdg-desktop-portal-wlr). Chaque client a, par
+    écran et selon `overlay_cursor`, une image gardée d'une copie à l'autre :
+    seules les zones changées sont redessinées. Une copie « avec dégâts »
+    attend que l'image ait changé et donne les rectangles changés ; avant,
+    elle aboutissait à chaque requête, image entière, même écran immobile
+    (un enregistreur faisait tourner le rendu en boucle). Scénario
+    `capture` (grim : écran entier, région, sans curseur).
 
 Aucune question ouverte pour l'instant.

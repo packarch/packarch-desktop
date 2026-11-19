@@ -93,8 +93,9 @@ fn render(state: &mut State) {
     };
     let output = h.output.clone();
     let mut elements = state.cursor_elements(&mut h.renderer, &output);
+    let cursor = elements.len();
     elements.extend(output_elements(state, &mut h.renderer, &output));
-    crate::protocols::screencopy::process(state, &mut h.renderer, &output, &elements);
+    crate::protocols::screencopy::process(state, &mut h.renderer, &output, &elements, cursor);
     let Headless {
         renderer,
         damage,
