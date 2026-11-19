@@ -1034,6 +1034,25 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn default_config() {
+        // Configuration installée dans /etc/xdg/packarch: lue sans
+        // avertissement, avec ses raccourcis et le menu du bureau
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let c = Config::load(&dir).unwrap();
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+        assert!(c.keybinds.len() > 20);
+        let menus = crate::menu::Menus::load(&dir).unwrap();
+        assert!(menus.map.contains_key(crate::menu::ROOT));
+        let xml = std::fs::read_to_string(dir.join("menu.xml")).unwrap();
+        let mut warnings = vec![];
+        crate::menu::Menus::default()
+            .parse(&xml, "", &mut warnings)
+            .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
     use super::*;
 
     #[test]

@@ -25,9 +25,13 @@ wlr\-randr, wlopm, wl\-clipboard) sont pris en charge.
 .TP
 .BI \-C ", " \-\-config\-dir " DOSSIER"
 Dossier de configuration (par défaut
-.IR ~/.config/packarch ,
-puis
-.IR /etc/xdg/packarch ).
+.IR ~/.config/packarch
+s'il contient
+.IR rc.xml ,
+sinon
+.IR /etc/xdg/packarch ,
+configuration par défaut installée avec packarch : terminal, menu du
+bureau au clic droit, raccourcis courants).
 .TP
 .BI \-s ", " \-\-startup " COMMANDE"
 Commande lancée au démarrage, après
@@ -103,7 +107,13 @@ une par ligne, pour les programmes lancés.
 .BR XKB_DEFAULT_LAYOUT ,
 .BR XKB_DEFAULT_VARIANT ,
 .B XKB_DEFAULT_OPTIONS
-règlent le clavier,
+règlent le clavier (sinon la disposition du système :
+.I /etc/X11/xorg.conf.d/00\-keyboard.conf
+écrit par
+.BR localectl ,
+puis
+.I /etc/default/keyboard
+de Debian et Ubuntu),
 .B XCURSOR_THEME
 et
 .B XCURSOR_SIZE

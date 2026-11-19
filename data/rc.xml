@@ -1,0 +1,149 @@
+<?xml version="1.0"?>
+<!--
+  Configuration par défaut de packarch (/etc/xdg/packarch/rc.xml), lue quand
+  ~/.config/packarch/rc.xml n'existe pas. Pour la modifier :
+    mkdir -p ~/.config/packarch
+    cp /etc/xdg/packarch/* ~/.config/packarch/
+  Elle ne suppose aucun autre programme : le terminal est le premier trouvé
+  parmi $TERMINAL, foot, kitty, alacritty… Voir `man packarch`.
+  Recharger après une modification : Super+Maj+r.
+-->
+<packarch_config>
+  <theme>
+    <!-- Un thème Openbox de /usr/share/themes ; vide : thème intégré -->
+    <name></name>
+    <titlebar>
+      <layout>:iconify,max,close</layout>
+      <showTitle>yes</showTitle>
+    </titlebar>
+    <cornerRadius>8</cornerRadius>
+    <dropShadows>yes</dropShadows>
+  </theme>
+  <desktops>
+    <names>
+      <name>1</name>
+      <name>2</name>
+      <name>3</name>
+      <name>4</name>
+    </names>
+  </desktops>
+  <keyboard>
+    <repeatRate>25</repeatRate>
+    <repeatDelay>600</repeatDelay>
+    <!-- Terminal et menus -->
+    <keybind key="W-Return">
+      <action name="Execute" command="for t in &quot;$TERMINAL&quot; foot kitty alacritty wezterm konsole gnome-terminal xfce4-terminal xterm; do command -v &quot;$t&quot; &gt;/dev/null 2&gt;&amp;1 &amp;&amp; exec &quot;$t&quot;; done" />
+    </keybind>
+    <keybind key="W-space"><action name="ShowMenu" menu="root-menu" /></keybind>
+    <keybind key="A-space">
+      <action name="ShowMenu" menu="client-menu" atCursor="no" />
+    </keybind>
+    <keybind key="W-S-r"><action name="Reconfigure" /></keybind>
+    <keybind key="W-S-e"><action name="Exit" /></keybind>
+    <!-- Fenêtres -->
+    <keybind key="A-Tab"><action name="NextWindow" /></keybind>
+    <keybind key="A-S-Tab"><action name="PreviousWindow" /></keybind>
+    <keybind key="A-F4"><action name="Close" /></keybind>
+    <keybind key="W-Left">
+      <action name="SnapToEdge" direction="left" combine="yes" />
+    </keybind>
+    <keybind key="W-Right">
+      <action name="SnapToEdge" direction="right" combine="yes" />
+    </keybind>
+    <keybind key="W-Up"><action name="Maximize" /></keybind>
+    <keybind key="W-Down">
+      <action name="UnMaximize" />
+      <action name="UnSnap" />
+    </keybind>
+    <keybind key="W-d"><action name="ToggleShowDesktop" /></keybind>
+    <!-- Bureaux (les chiffres marchent aussi sans Maj sur un clavier
+         français : packarch compare les touches physiques) -->
+    <keybind key="W-1"><action name="GoToDesktop" to="1" /></keybind>
+    <keybind key="W-2"><action name="GoToDesktop" to="2" /></keybind>
+    <keybind key="W-3"><action name="GoToDesktop" to="3" /></keybind>
+    <keybind key="W-4"><action name="GoToDesktop" to="4" /></keybind>
+    <keybind key="W-S-1"><action name="SendToDesktop" to="1" follow="no" /></keybind>
+    <keybind key="W-S-2"><action name="SendToDesktop" to="2" follow="no" /></keybind>
+    <keybind key="W-S-3"><action name="SendToDesktop" to="3" follow="no" /></keybind>
+    <keybind key="W-S-4"><action name="SendToDesktop" to="4" follow="no" /></keybind>
+    <keybind key="C-A-Right">
+      <action name="GoToDesktop" to="right" wrap="yes" />
+    </keybind>
+    <keybind key="C-A-Left">
+      <action name="GoToDesktop" to="left" wrap="yes" />
+    </keybind>
+  </keyboard>
+  <mouse>
+    <context name="Frame">
+      <mousebind button="W-Left" action="Press">
+        <action name="Focus" /><action name="Raise" />
+      </mousebind>
+      <mousebind button="W-Left" action="Drag"><action name="Move" /></mousebind>
+      <mousebind button="W-Right" action="Press">
+        <action name="Focus" /><action name="Raise" />
+      </mousebind>
+      <mousebind button="W-Right" action="Drag"><action name="Resize" /></mousebind>
+    </context>
+    <context name="Border">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" /><action name="Raise" />
+      </mousebind>
+      <mousebind button="Left" action="Drag"><action name="Resize" /></mousebind>
+    </context>
+    <context name="TitleBar">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" /><action name="Raise" />
+      </mousebind>
+    </context>
+    <context name="Title">
+      <mousebind button="Left" action="Drag"><action name="Move" /></mousebind>
+      <mousebind button="Left" action="DoubleClick">
+        <action name="ToggleMaximize" />
+      </mousebind>
+      <mousebind button="Right" action="Click">
+        <action name="ShowMenu" menu="client-menu" />
+      </mousebind>
+    </context>
+    <context name="Maximize">
+      <mousebind button="Left" action="Click"><action name="ToggleMaximize" /></mousebind>
+    </context>
+    <context name="Iconify">
+      <mousebind button="Left" action="Click"><action name="Iconify" /></mousebind>
+    </context>
+    <context name="Close">
+      <mousebind button="Left" action="Click"><action name="Close" /></mousebind>
+    </context>
+    <context name="Client">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" /><action name="Raise" />
+      </mousebind>
+      <mousebind button="Middle" action="Press">
+        <action name="Focus" /><action name="Raise" />
+      </mousebind>
+      <mousebind button="Right" action="Press">
+        <action name="Focus" /><action name="Raise" />
+      </mousebind>
+    </context>
+    <!-- Bureau : clic droit, menu ; clic milieu, liste des fenêtres ;
+         molette, bureau suivant ou précédent -->
+    <context name="Root">
+      <mousebind button="Right" action="Press">
+        <action name="ShowMenu" menu="root-menu" />
+      </mousebind>
+      <mousebind button="Middle" action="Press">
+        <action name="ShowMenu" menu="client-list-combined-menu" />
+      </mousebind>
+      <mousebind direction="Up" action="Scroll">
+        <action name="GoToDesktop" to="left" wrap="yes" />
+      </mousebind>
+      <mousebind direction="Down" action="Scroll">
+        <action name="GoToDesktop" to="right" wrap="yes" />
+      </mousebind>
+    </context>
+  </mouse>
+  <libinput>
+    <device category="default">
+      <tap>yes</tap>
+    </device>
+  </libinput>
+</packarch_config>

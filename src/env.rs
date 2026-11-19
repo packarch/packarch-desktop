@@ -58,8 +58,8 @@ pub struct Xkb {
 }
 
 /// Disposition: variables `XKB_DEFAULT_*` du fichier `environment`, puis
-/// de l'environnement du processus, puis celle du système (localectl:
-/// `/etc/X11/xorg.conf.d/00-keyboard.conf`)
+/// de l'environnement du processus, puis celle du système
+/// ([`system_keyboard`])
 pub fn xkb(vars: &[(String, String)]) -> Xkb {
     let get = |name: &str| {
         vars.iter()
@@ -77,9 +77,8 @@ pub fn xkb(vars: &[(String, String)]) -> Xkb {
         options: get("XKB_DEFAULT_OPTIONS"),
     };
     if x.layout.is_empty()
-        && let Ok(text) = std::fs::read_to_string("/etc/X11/xorg.conf.d/00-keyboard.conf")
+        && let Some(system) = system_keyboard()
     {
-        let system = parse_xorg_keyboard(&text);
         x.layout = system.layout;
         if x.variant.is_empty() {
             x.variant = system.variant;
@@ -89,6 +88,36 @@ pub fn xkb(vars: &[(String, String)]) -> Xkb {
         }
         if x.options.is_none() {
             x.options = system.options;
+        }
+    }
+    x
+}
+
+/// Disposition du système: `/etc/X11/xorg.conf.d/00-keyboard.conf`
+/// (localectl: Arch, Fedora…), sinon `/etc/default/keyboard` (Debian,
+/// Ubuntu); la première qui donne une disposition
+fn system_keyboard() -> Option<Xkb> {
+    let sources: [(&str, fn(&str) -> Xkb); 2] = [
+        ("/etc/X11/xorg.conf.d/00-keyboard.conf", parse_xorg_keyboard),
+        ("/etc/default/keyboard", parse_default_keyboard),
+    ];
+    sources.iter().find_map(|(path, parse)| {
+        let x = parse(&std::fs::read_to_string(path).ok()?);
+        (!x.layout.is_empty()).then_some(x)
+    })
+}
+
+/// `XKBLAYOUT="fr"` … de `/etc/default/keyboard` (Debian); une valeur vide
+/// compte comme absente
+pub fn parse_default_keyboard(text: &str) -> Xkb {
+    let mut x = Xkb::default();
+    for (key, value) in parse_environment(text, |_| None) {
+        match key.as_str() {
+            "XKBLAYOUT" => x.layout = value,
+            "XKBVARIANT" => x.variant = value,
+            "XKBMODEL" => x.model = value,
+            "XKBOPTIONS" if !value.is_empty() => x.options = Some(value),
+            _ => {}
         }
     }
     x
@@ -143,6 +172,17 @@ mod tests {
 EndSection"#;
         let x = parse_xorg_keyboard(text);
         assert_eq!((x.layout.as_str(), x.variant.as_str()), ("fr", "oss"));
+        assert_eq!(x.options, None);
+    }
+
+    #[test]
+    fn debian() {
+        let text = "# KEYBOARD CONFIGURATION FILE\n\nXKBMODEL=\"pc105\"\nXKBLAYOUT=\"fr\"\nXKBVARIANT=\"latin9\"\nXKBOPTIONS=\"\"\n\nBACKSPACE=\"guess\"\n";
+        let x = parse_default_keyboard(text);
+        assert_eq!(
+            (x.model.as_str(), x.layout.as_str(), x.variant.as_str()),
+            ("pc105", "fr", "latin9")
+        );
         assert_eq!(x.options, None);
     }
 }

@@ -51,6 +51,38 @@ Options cachées pour les essais : `--backend headless`, `--size 1920x1200`,
 `--scale 1.5`, `--script FICHIER` (format décrit dans `src/script.rs`, avec
 une horloge simulée pour capturer une animation à un instant donné).
 
+## Installer hors de Packarch
+
+`packarch` est un compositeur autonome, comme Openbox ou labwc : il marche
+sans le reste du bureau Packarch (barre, menus rofi, thèmes). Il faut
+Rust 1.88 ou plus récent (rustup si celui de la distribution est plus
+ancien) et les bibliothèques de développement de libdrm, libinput,
+libxkbcommon, libseat (logind ou seatd), libudev, Mesa (EGL, GBM) ; Xwayland
+pour les applications X11.
+
+```sh
+cargo build --release
+sudo install -Dm755 target/release/packarch /usr/local/bin/packarch
+sudo install -Dm755 target/release/packarch-partage /usr/local/bin/packarch-partage
+sudo install -Dm644 data/rc.xml /etc/xdg/packarch/rc.xml
+sudo install -Dm644 data/menu.xml /etc/xdg/packarch/menu.xml
+sudo install -Dm644 data/packarch.desktop /usr/share/wayland-sessions/packarch.desktop
+sudo install -Dm644 data/packarch-session.target /usr/lib/systemd/user/packarch-session.target
+sudo install -Dm644 data/packarch-portals.conf /usr/share/xdg-desktop-portal/packarch-portals.conf
+sudo install -Dm644 data/xdg-desktop-portal-wlr.conf /etc/xdg/xdg-desktop-portal-wlr/packarch
+sudo install -Dm644 docs/packarch.1 /usr/local/share/man/man1/packarch.1
+```
+
+La session « packarch » apparaît alors dans le gestionnaire de connexion
+(ou `packarch` depuis une console). Sans `~/.config/packarch/rc.xml`, la
+configuration de `/etc/xdg/packarch` s'applique : clic droit sur le bureau
+ou Super+Espace pour le menu, Super+Entrée pour un terminal (`$TERMINAL`,
+sinon foot, kitty, alacritty… le premier installé), Super+Maj+e pour
+quitter. Pour la modifier, la copier dans `~/.config/packarch/`. Les
+thèmes de fenêtres sont ceux d'Openbox (`/usr/share/themes/*/openbox-3`).
+Le clavier suit `XKB_DEFAULT_LAYOUT`, sinon la disposition du système
+(`localectl`, ou `/etc/default/keyboard` sous Debian et Ubuntu).
+
 ## Licence
 
 Au choix :
