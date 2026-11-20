@@ -162,6 +162,8 @@ pub struct WindowRule {
     pub skip_taskbar: Option<bool>,
     pub skip_window_switcher: Option<bool>,
     pub fixed_position: Option<bool>,
+    pub drop_shadow: Option<bool>,
+    pub keep_border: Option<bool>,
 }
 
 /// Correspondance avec jokers `*` et `?`, sans casse
@@ -983,6 +985,8 @@ impl Config {
                 skip_taskbar: attr_bool(r, "skipTaskbar"),
                 skip_window_switcher: attr_bool(r, "skipWindowSwitcher"),
                 fixed_position: attr_bool(r, "fixedPosition"),
+                drop_shadow: attr_bool(r, "dropShadow"),
+                keep_border: attr_bool(r, "keepBorder"),
             };
             if rule.identifier.is_none() && rule.title.is_none() {
                 r.warn(c, "règle sans identifier ni title, ignorée");

@@ -186,6 +186,12 @@ pub struct View {
     pub skip_taskbar: bool,
     pub skip_switcher: bool,
     pub fixed_position: bool,
+    /// Ombre portée (règle dropShadow="no": fenêtre transparente posée sur
+    /// le fond, comme conky)
+    pub drop_shadow: bool,
+    /// Bordure d'une vue sans cadre (règle keepBorder; sinon <keepBorder>
+    /// de rc.xml)
+    pub keep_border: Option<bool>,
 }
 
 impl View {
@@ -199,6 +205,8 @@ impl View {
             skip_taskbar: false,
             skip_switcher: false,
             fixed_position: false,
+            drop_shadow: true,
+            keep_border: None,
             window,
             loc: Point::from((0, 0)),
             mapped: false,
@@ -291,7 +299,7 @@ impl View {
         } else {
             Frame {
                 title: false,
-                border: keep_border,
+                border: self.keep_border.unwrap_or(keep_border),
             }
         }
     }

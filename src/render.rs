@@ -1338,7 +1338,8 @@ fn view_elements(
     });
     let shadow_size = colors.shadow_size;
     let shadow_color = colors.shadow_color;
-    let shadows = config.drop_shadows && (free || config.drop_shadows_on_tiled) && !fullscreen;
+    let shadows =
+        config.drop_shadows && view.drop_shadow && (free || config.drop_shadows_on_tiled) && !fullscreen;
     let shadow = (shadows && shadow_size > 0 && shadow_color.a > 0.0).then_some(ShadowParams {
         color: shadow_color,
         size: shadow_size,

@@ -1,5 +1,5 @@
 .\" SPDX-License-Identifier: MIT OR Apache-2.0
-.TH PACKARCH 1 "novembre 2026" "packarch 1.4.11" "Commandes"
+.TH PACKARCH 1 "novembre 2026" "packarch 1.4.12" "Commandes"
 .SH NOM
 packarch \- compositeur Wayland à fenêtres flottantes de Packarch
 .SH SYNOPSIS
@@ -248,6 +248,9 @@ Contextes :
 .BR * " et " ? ),
 attributs
 .BR serverDecoration ", " skipTaskbar ", " skipWindowSwitcher ", " fixedPosition ,
+.BR dropShadow " et " keepBorder
+(no : sans ombre portée et sans bordure, pour une fenêtre sans cadre et
+transparente posée sur le fond),
 et des actions exécutées à l'apparition de la fenêtre.
 .TP
 .B menu

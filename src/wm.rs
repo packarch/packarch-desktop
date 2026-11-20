@@ -1443,6 +1443,12 @@ impl State {
                 if let Some(b) = rule.fixed_position {
                     v.fixed_position = b;
                 }
+                if let Some(b) = rule.drop_shadow {
+                    v.drop_shadow = b;
+                }
+                if let Some(b) = rule.keep_border {
+                    v.keep_border = Some(b);
+                }
             }
             let origin = Origin {
                 button: None,

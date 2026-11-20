@@ -473,7 +473,10 @@ priorité 3, § 15).
   `*` et `?`, sans casse. `identifier` est l'app_id Wayland ou la classe X11.
 - Contenu : actions exécutées à la première apparition de la vue (`AutoPlace`,
   `ToggleAlwaysOnTop`, `SendToDesktop`, `Maximize`…), et propriétés :
-  `serverDecoration`, `skipTaskbar`, `skipWindowSwitcher`, `fixedPosition`.
+  `serverDecoration`, `skipTaskbar`, `skipWindowSwitcher`, `fixedPosition`,
+  `dropShadow` et `keepBorder` (1.4.12 : `no` retire l'ombre portée et la
+  bordure d'une fenêtre sans cadre et transparente posée sur le fond, comme
+  conky ; `keepBorder` l'emporte sur celui de `<theme>`).
 - Utilisé par Packarch : centrage de Waypaper et du sélecteur de thèmes.
 
 ### 8.6 Collage et résistance
