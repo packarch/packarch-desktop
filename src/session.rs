@@ -15,6 +15,17 @@ use crate::state::State;
 /// Cible systemd de la session (`data/packarch-session.target`)
 const SESSION_TARGET: &str = "packarch-session.target";
 
+/// Variables de la session envoyées à systemd et à D-Bus, retirées de
+/// l'environnement de systemd à la fin de la session
+const EXPORTED: [&str; 6] = [
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_DESKTOP",
+    "XDG_SESSION_TYPE",
+    "PACKARCH_PID",
+];
+
 /// Fichier du numéro de processus d'une instance
 pub fn pid_file(display: &str) -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join(format!("packarch-{display}.pid")))
@@ -90,15 +101,7 @@ impl State {
 
     /// Commande qui envoie les variables de la session à systemd et à D-Bus
     fn export_command(&self) -> String {
-        let names = [
-            "WAYLAND_DISPLAY",
-            "DISPLAY",
-            "XDG_CURRENT_DESKTOP",
-            "XDG_SESSION_DESKTOP",
-            "XDG_SESSION_TYPE",
-            "PACKARCH_PID",
-        ];
-        let present: Vec<&str> = names
+        let present: Vec<&str> = EXPORTED
             .into_iter()
             .filter(|n| self.child_env.iter().any(|(k, _)| k == n))
             .collect();
@@ -206,6 +209,9 @@ impl State {
             let cmd = format!("sh '{}'", autostart.display().to_string().replace('\'', "'\\''"));
             self.spawn(&cmd);
         }
+        for cmd in std::mem::take(&mut self.startup) {
+            self.spawn(&cmd);
+        }
     }
 
     /// Fin de la session: fichier du numéro de processus
@@ -229,15 +235,8 @@ impl State {
         // Les variables exportées ne doivent pas survivre à la session
         if self.env_exported {
             let _ = std::process::Command::new("systemctl")
-                .args([
-                    "--user",
-                    "unset-environment",
-                    "WAYLAND_DISPLAY",
-                    "DISPLAY",
-                    "XDG_CURRENT_DESKTOP",
-                    "XDG_SESSION_DESKTOP",
-                    "PACKARCH_PID",
-                ])
+                .args(["--user", "unset-environment"])
+                .args(EXPORTED)
                 .status();
         }
     }

@@ -289,29 +289,11 @@ impl State {
     pub fn output_changed(&mut self, output: &Output) {
         smithay::desktop::layer_map_for_output(output).arrange();
         self.update_xwayland_scale();
-        let scale = output.current_scale().fractional_scale();
-        let mut surfaces: Vec<_> = self.views.iter().map(|v| v.surface().clone()).collect();
-        surfaces.extend(
-            smithay::desktop::layer_map_for_output(output)
-                .layers()
-                .map(|l| l.wl_surface().clone()),
-        );
-        for s in surfaces {
-            smithay::wayland::compositor::with_states(&s, |data| {
-                smithay::wayland::fractional_scale::with_fractional_scale(data, |fs| {
-                    fs.set_preferred_scale(scale)
-                });
-                smithay::wayland::compositor::send_surface_state(
-                    &s,
-                    data,
-                    scale.ceil() as i32,
-                    Transform::Normal,
-                );
-            });
-        }
         for i in 0..self.views.len() {
             self.reapply_tiling(i, self.views[i].tiling.clone());
         }
+        // Chaque surface à l'échelle de son écran, pas de celui qui change
+        self.update_surface_outputs();
     }
 
     /// Écran éteint (wlopm)

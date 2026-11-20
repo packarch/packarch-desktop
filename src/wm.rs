@@ -817,15 +817,28 @@ impl State {
 
     /// Termine le processus d'un client: SIGTERM, puis SIGKILL après 2 s
     fn kill(&mut self, i: usize) {
-        let surface = self.views[i].surface().clone();
-        let Some(pid) = self
-            .dh
-            .get_client(surface.id())
-            .ok()
-            .and_then(|c| c.get_credentials(&self.dh).ok())
-            .map(|c| c.pid)
-        else {
-            return;
+        // Fenêtre X11: le client Wayland de sa surface est Xwayland, que le
+        // signal arrêterait avec toutes les applications X11. Son processus
+        // est celui de _NET_WM_PID; sans lui, la fenêtre est seulement fermée
+        let pid = if let Some(x) = self.views[i].x11() {
+            let Some(pid) = x.pid().and_then(|p| i32::try_from(p).ok()) else {
+                info!("fenêtre X11 sans _NET_WM_PID: fermée, processus non arrêté");
+                self.views[i].close();
+                return;
+            };
+            pid
+        } else {
+            let surface = self.views[i].surface().clone();
+            let Some(pid) = self
+                .dh
+                .get_client(surface.id())
+                .ok()
+                .and_then(|c| c.get_credentials(&self.dh).ok())
+                .map(|c| c.pid)
+            else {
+                return;
+            };
+            pid
         };
         if pid <= 1 || pid as u32 == std::process::id() {
             return;
@@ -1472,6 +1485,7 @@ impl State {
         }
         self.apply_session_env();
         self.apply_keyboard();
+        self.configure_devices();
         self.update_xwayland_scale();
         // Les vues imposées suivent les nouvelles marges et le nouveau cadre
         for i in 0..self.views.len() {

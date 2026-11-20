@@ -195,10 +195,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     state.apply_session_env();
     state.apply_keyboard();
     session::watch_signals(&event_loop.handle());
+    // Commandes de --startup : après autostart (§ 12), donc avec DISPLAY
+    state.startup = cli.startup.clone();
     state.start_session();
-    for cmd in &cli.startup {
-        state.spawn(cmd);
-    }
     if let Some(path) = &cli.script {
         let text = std::fs::read_to_string(path)?;
         let steps = script::parse(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
@@ -208,10 +207,19 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     // Événements envoyés aux clients à chaque tour de boucle : retours de
     // présentation du vblank, libérations de tampons, rappels de trame.
     // Sinon ils attendaient le rendu suivant ou la requête suivante du client
-    let result = event_loop.run(None, &mut state, |state| {
-        let _ = state.dh.flush_clients();
-    });
+    // Une panique dans la boucle (déjà journalisée, voir `panic_hook`) ne
+    // saute pas la fin de session : fichier du numéro de processus, cible
+    // systemd et variables exportées ne survivent pas au compositeur
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        event_loop.run(None, &mut state, |state| {
+            let _ = state.dh.flush_clients();
+        })
+    }));
     state.end_session();
+    let result = match result {
+        Ok(r) => r,
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
     result?;
     if script::FAILED.load(std::sync::atomic::Ordering::Relaxed) {
         anyhow::bail!("scénario d'essai: au moins une vérification a échoué");

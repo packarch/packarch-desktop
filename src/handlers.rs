@@ -4,8 +4,9 @@
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
+use smithay::desktop::utils::with_surfaces_surface_tree;
 use smithay::desktop::{
-    LayerSurface, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window,
+    LayerSurface, PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy, Window,
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output,
 };
 use smithay::input::pointer::{CursorImageStatus, Focus};
@@ -61,14 +62,40 @@ use crate::wm::Origin;
 
 // --- Surfaces -------------------------------------------------------------
 
-fn surface_scale(state: &State, surface: &WlSurface, data: &SurfaceData) {
-    let scale = state
-        .outputs
-        .first()
-        .map(|o| o.current_scale().fractional_scale())
-        .unwrap_or(1.0);
+/// Échelle annoncée à une surface (fractional-scale, et
+/// wl_surface.preferred_buffer_scale); sans effet si elle n'a pas changé
+fn set_scale(surface: &WlSurface, data: &SurfaceData, scale: f64) {
     with_fractional_scale(data, |fs| fs.set_preferred_scale(scale));
     send_surface_state(surface, data, scale.ceil() as i32, Transform::Normal);
+}
+
+/// Échelle annoncée à une surface, ses sous-surfaces et ses fenêtres
+/// surgissantes
+fn set_tree_scale(surface: &WlSurface, scale: f64) {
+    with_surfaces_surface_tree(surface, |s, data| set_scale(s, data, scale));
+    for (popup, _) in PopupManager::popups_for_surface(surface) {
+        with_surfaces_surface_tree(popup.wl_surface(), |s, data| set_scale(s, data, scale));
+    }
+}
+
+/// Première échelle d'une surface, avant son premier rendu: celle de
+/// l'écran de sa vue si elle en a une, sinon de l'écran du pointeur (où
+/// les nouvelles fenêtres se placent). `update_surface_outputs` la corrige
+/// ensuite à chaque rendu. À appeler hors de `with_states`: la recherche
+/// de la surface parente verrouille les mêmes données.
+fn surface_scale(state: &State, surface: &WlSurface) {
+    let mut root = surface.clone();
+    while let Some(parent) = get_parent(&root) {
+        root = parent;
+    }
+    let output = match state.view_index(&root) {
+        Some(i) if state.views[i].mapped => state.view_output(i),
+        _ => state.output_at(state.pointer),
+    };
+    let scale = output
+        .map(|o| o.current_scale().fractional_scale())
+        .unwrap_or(1.0);
+    with_states(surface, |data| set_scale(surface, data, scale));
 }
 
 impl CompositorHandler for State {
@@ -85,7 +112,7 @@ impl CompositorHandler for State {
     }
 
     fn new_surface(&mut self, surface: &WlSurface) {
-        with_states(surface, |data| surface_scale(self, surface, data));
+        surface_scale(self, surface);
         add_commit_blockers(surface);
     }
 
@@ -298,12 +325,6 @@ impl State {
     /// Première apparition d'une vue: placement, focus, animation, règles
     pub fn map_view(&mut self, i: usize) {
         self.views[i].mapped = true;
-        if let Some(output) = self.outputs.first().cloned() {
-            use smithay::desktop::space::SpaceElement;
-            self.views[i]
-                .window
-                .output_enter(&output, self.output_geometry(&output));
-        }
         // Une fenêtre X11 qui demande une position visible la garde (§ 8.2)
         let x11_pos = self.views[i].x11().map(|x| x.geometry().loc).filter(|p| {
             *p != Point::from((0, 0)) && self.outputs.iter().any(|o| self.output_geometry(o).contains(*p))
@@ -316,6 +337,7 @@ impl State {
         if self.views[i].x11().is_some() {
             self.configure(i, None);
         }
+        self.update_view_output(i);
         let i = self.focus_view(i, true);
         self.appear(i, crate::render::Appear::Open);
         let app_id = self.views[i].app_id();
@@ -325,6 +347,65 @@ impl State {
             info!("fenêtre: « {} » ({app_id})", self.views[i].title());
         }
         self.apply_rules(i);
+    }
+
+    /// Écran d'une vue: celui du centre de son cadre, sinon le premier
+    pub fn view_output(&self, i: usize) -> Option<Output> {
+        let frame = self.frame_rect(i);
+        let center = frame.loc.to_f64() + frame.size.to_f64().to_point().downscale(2.0);
+        self.output_at(center)
+    }
+
+    /// Écrans et échelle d'une vue affichée: wl_surface.enter et leave pour
+    /// chaque écran qu'elle touche, échelle de son écran (`view_output`)
+    /// pour ses surfaces et ses fenêtres surgissantes
+    fn update_view_output(&self, i: usize) {
+        use smithay::desktop::space::SpaceElement;
+        let view = &self.views[i];
+        if !view.mapped {
+            return;
+        }
+        // Origine de la surface, et son étendue (sous-surfaces et fenêtres
+        // surgissantes comprises) en coordonnées globales
+        let origin = view.loc - view.window.geometry().loc;
+        let mut bbox = view.window.bbox();
+        bbox.loc += origin;
+        for output in &self.outputs {
+            match bbox.intersection(self.output_geometry(output)) {
+                Some(mut overlap) => {
+                    overlap.loc -= origin;
+                    view.window.output_enter(output, overlap);
+                }
+                None => view.window.output_leave(output),
+            }
+        }
+        if let Some(output) = self.view_output(i) {
+            set_tree_scale(view.surface(), output.current_scale().fractional_scale());
+        }
+    }
+
+    /// Écran et échelle de toutes les surfaces affichées, après chaque
+    /// rendu et chaque changement d'écran: avec deux écrans d'échelles
+    /// différentes, chaque fenêtre suit l'échelle du sien, y compris quand
+    /// elle en change. Sans effet pour une surface dont rien n'a changé.
+    pub fn update_surface_outputs(&self) {
+        for i in 0..self.views.len() {
+            self.update_view_output(i);
+        }
+        for output in &self.outputs {
+            let scale = output.current_scale().fractional_scale();
+            for layer in layer_map_for_output(output).layers() {
+                set_tree_scale(layer.wl_surface(), scale);
+            }
+        }
+        for (output, lock) in &self.lock_surfaces {
+            set_tree_scale(lock.wl_surface(), output.current_scale().fractional_scale());
+        }
+        if let Some((icon, _)) = &self.dnd_icon
+            && let Some(output) = self.output_at(self.pointer)
+        {
+            set_tree_scale(icon, output.current_scale().fractional_scale());
+        }
     }
 
     /// Vue parente d'un dialogue (xdg parent, WM_TRANSIENT_FOR)
@@ -413,7 +494,7 @@ impl DmabufHandler for State {
 
 impl FractionalScaleHandler for State {
     fn new_fractional_scale(&mut self, surface: WlSurface) {
-        with_states(&surface, |data| surface_scale(self, &surface, data));
+        surface_scale(self, &surface);
     }
 }
 

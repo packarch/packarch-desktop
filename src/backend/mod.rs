@@ -140,6 +140,8 @@ pub fn after_render(
         send_frames_surface_tree(s, output, time, throttle, primary);
     }
     layer_map_for_output(output).cleanup();
+    // Écran et échelle de chaque surface (une vue a pu changer d'écran)
+    state.update_surface_outputs();
     for view in &state.views {
         view.window.refresh();
     }

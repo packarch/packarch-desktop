@@ -74,6 +74,9 @@ pub struct Udev {
     gbm: GbmDevice<DrmDeviceFd>,
     surfaces: HashMap<crtc::Handle, Surface>,
     libinput: Libinput,
+    /// Périphériques d'entrée branchés (réglages `<libinput>` réappliqués au
+    /// rechargement)
+    devices: Vec<libinput::Device>,
     /// Sources des écrans (pour les retirer avec le GPU)
     _drm_token: RegistrationToken,
 }
@@ -195,12 +198,19 @@ pub fn init(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> an
     let input = LibinputInputBackend::new(libinput.clone());
     event_loop
         .handle()
-        .insert_source(input, |event, _, state| {
-            if let InputEvent::DeviceAdded { mut device } = event {
+        .insert_source(input, |event, _, state| match event {
+            InputEvent::DeviceAdded { mut device } => {
                 state.configure_device(&mut device);
-                return;
+                if let Some(u) = state.udev() {
+                    u.devices.push(device);
+                }
             }
-            state.process_input(event);
+            InputEvent::DeviceRemoved { device } => {
+                if let Some(u) = state.udev() {
+                    u.devices.retain(|d| *d != device);
+                }
+            }
+            event => state.process_input(event),
         })
         .map_err(|e| anyhow::anyhow!("libinput: {e}"))?;
 
@@ -234,6 +244,7 @@ pub fn init(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> an
         gbm,
         surfaces: HashMap::new(),
         libinput,
+        devices: vec![],
         _drm_token: drm_token,
     })));
     state.udev_scan();
@@ -662,6 +673,16 @@ impl State {
                     self.udev_render(c);
                 }
             }
+        }
+    }
+
+    /// Réglages `<libinput>` réappliqués à tous les périphériques branchés
+    /// (rechargement, § 5.7). Un réglage retiré de `rc.xml` garde sa valeur
+    /// jusqu'au prochain branchement du périphérique.
+    pub fn configure_devices(&mut self) {
+        let Some(u) = self.udev() else { return };
+        for mut device in u.devices.clone() {
+            self.configure_device(&mut device);
         }
     }
 

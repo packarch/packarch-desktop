@@ -34,6 +34,9 @@
 //!                        reçoit un rappel de trame à chaque rendu de cet
 //!                        écran ; sinon un par seconde) ; no : aucun ;
 //!                        HEADLESS-2 : cet écran
+//! output-scale HEADLESS-2 1.5   change l'échelle d'un écran
+//! expect-scale un 1.5    vérifie l'échelle annoncée à la surface de la vue
+//!                        (fractional-scale)
 //! expect-menu root-menu prefs   vérifie les menus ouverts (none: aucun)
 //! wait-menu 2 5000       attend 2 menus ouverts (pipemenus, 5 s au plus)
 //! point-menu Terminal    pointeur sur l'entrée de ce libellé
@@ -98,6 +101,8 @@ pub enum Step {
     ExpectVisible(String, bool),
     ExpectDecorated(String, bool),
     ExpectPrimary(String, Primary),
+    OutputScale(String, f64),
+    ExpectScale(String, f64),
     ExpectMenu(Vec<String>),
     WaitMenu(usize, u64),
     PointMenu(String),
@@ -206,6 +211,19 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                             "expect-decorated" => Step::ExpectDecorated(t, b),
                             _ => Step::ExpectVisible(t, b),
                         }
+                    }
+                }
+                "output-scale" | "expect-scale" => {
+                    let (name, scale) = rest
+                        .trim()
+                        .rsplit_once(' ')
+                        .ok_or_else(|| format!("{cmd} NOM ÉCHELLE"))?;
+                    let scale: f64 = scale.parse().map_err(|_| format!("échelle: {scale}"))?;
+                    let name = name.trim().to_string();
+                    if cmd == "output-scale" {
+                        Step::OutputScale(name, scale)
+                    } else {
+                        Step::ExpectScale(name, scale)
                     }
                 }
                 "expect-desktop" => Step::ExpectDesktop(num(args.next())? as usize),
@@ -486,6 +504,36 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>, min_tolerance:
                                     state,
                                     format!("« {title} »: écran principal {got}, attendu: {want:?}"),
                                 );
+                            }
+                        }
+                        None => fail(state, format!("pas de vue « {title} »")),
+                    }
+                }
+                Step::OutputScale(name, scale) => {
+                    match state.outputs.iter().find(|o| o.name() == name).cloned() {
+                        Some(o) => {
+                            let scale = smithay::output::Scale::Fractional(scale);
+                            o.change_current_state(None, None, Some(scale), None);
+                            state.output_changed(&o);
+                        }
+                        None => fail(state, format!("pas d'écran « {name} »")),
+                    }
+                }
+                Step::ExpectScale(title, want) => {
+                    let surface = state
+                        .views
+                        .iter()
+                        .find(|v| v.title() == title)
+                        .and_then(|v| v.window.wl_surface().map(|s| s.into_owned()));
+                    match surface {
+                        Some(s) => {
+                            let got = smithay::wayland::compositor::with_states(&s, |data| {
+                                smithay::wayland::fractional_scale::with_fractional_scale(data, |fs| {
+                                    fs.preferred_scale()
+                                })
+                            });
+                            if got != Some(want) {
+                                fail(state, format!("« {title} »: échelle {got:?}, attendue: {want}"));
                             }
                         }
                         None => fail(state, format!("pas de vue « {title} »")),

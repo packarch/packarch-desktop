@@ -197,6 +197,8 @@ pub struct State {
     pub xwayland: crate::xwayland::Xwayland,
     /// Le script autostart a été lancé
     pub autostarted: bool,
+    /// Commandes de `--startup`, lancées après le script autostart (§ 12)
+    pub startup: Vec<String>,
     /// L'environnement a été exporté vers systemd et D-Bus
     pub env_exported: bool,
     /// `packarch-session.target` a été démarrée
@@ -397,6 +399,7 @@ impl State {
                 shell: xwayland_shell,
             },
             autostarted: false,
+            startup: vec![],
             env_exported: false,
             session_target: false,
             keybinds_off: false,

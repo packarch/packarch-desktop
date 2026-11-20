@@ -1,0 +1,26 @@
+# Échelle par écran : avec deux écrans d'échelles différentes, chaque
+# fenêtre reçoit l'échelle de l'écran où se trouve le centre de son cadre,
+# et en change avec lui. Changer l'échelle d'un écran ne touche pas les
+# fenêtres de l'autre.
+#reference
+#! --no-animations --outputs 2
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5
+wait-views 1 5000
+wait 200
+expect-scale un 1
+# Le second écran passe à 1,5 : la fenêtre, sur le premier, reste à 1
+output-scale HEADLESS-2 1.5
+wait 200
+expect-scale un 1
+# Entièrement sur le second écran
+action <action name="MoveRelative" x="1280" y="0"/>
+wait 200
+expect-scale un 1.5
+# Nouvelle fenêtre, ouverte sous le pointeur (premier écran)
+spawn client-essai --title deux --size 300x200 --color a53a3a
+wait-views 2 5000
+wait 200
+expect-scale deux 1
+expect-scale un 1.5
+quit
