@@ -673,7 +673,7 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
     elements.extend(layer_elements(renderer, Layer::Overlay));
     if let Some(i) = full {
         elements.extend(animated_view(
-            state, renderer, i, scale, output_loc, &progs, now, 0.0,
+            state, renderer, i, scale, output_loc, &progs, now, None,
         ));
     }
     elements.extend(layer_elements(renderer, Layer::Top));
@@ -786,8 +786,8 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
     }
 
     // Changement de bureau: les vues de l'ancien bureau sortent, celles du
-    // nouveau entrent, d'un écran de large (§ 10.5)
-    let width = state.output_geometry(output).size.w as f64;
+    // nouveau entrent, selon le style choisi (§ 10.5)
+    let style = state.config.animations.switch_style;
     let slide = match state.desk_anim {
         Some((a, from)) if !a.done(now) => {
             let p = a.value(now);
@@ -802,12 +802,12 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
     };
     for &i in stacking.iter().rev() {
         if Some(i) != full {
-            let shift = match slide {
-                Some((p, dir, _)) if !state.views[i].omnipresent => dir * width * (1.0 - p),
-                _ => 0.0,
+            let desk = match slide {
+                Some((p, dir, _)) if !state.views[i].omnipresent => Some(style.look(p, dir, true)),
+                _ => None,
             };
             elements.extend(animated_view(
-                state, renderer, i, scale, output_loc, &progs, now, shift,
+                state, renderer, i, scale, output_loc, &progs, now, desk,
             ));
         }
     }
@@ -828,7 +828,7 @@ fn scene_elements(state: &mut State, renderer: &mut GlesRenderer, output: &Outpu
                 output_loc,
                 &progs,
                 now,
-                -dir * width * p,
+                Some(style.look(p, dir, false)),
             ));
         }
     }
@@ -866,7 +866,7 @@ fn animated_view(
     output_loc: Point<i32, Logical>,
     progs: &Progs,
     now: std::time::Duration,
-    shift: f64,
+    desk: Option<crate::anim::DeskLook>,
 ) -> Vec<Elem> {
     let frame = state.frame_rect(i);
     let mut look = match state.views[i].appear {
@@ -877,7 +877,19 @@ fn animated_view(
         }
         None => Look::none(),
     };
-    look.offset.x += shift;
+    // Changement de bureau: échelle autour du centre de l'écran de la vue,
+    // décalage en largeurs de cet écran
+    if let Some(d) = desk
+        && let Some(screen) = state.view_output(i).map(|o| state.output_geometry(&o).to_f64())
+    {
+        let f = frame.to_f64();
+        let center = f.loc + f.size.to_point().downscale(2.0);
+        let middle = screen.loc + screen.size.to_point().downscale(2.0);
+        look.alpha *= d.alpha;
+        look.scale *= d.scale;
+        look.offset.x += (middle.x - center.x) * (1.0 - d.scale) + d.shift * screen.size.w * d.scale;
+        look.offset.y += (middle.y - center.y) * (1.0 - d.scale);
+    }
     // Rectangle animé (maximisation, collage): l'image actuelle est étirée
     // du cadre affiché au rectangle intermédiaire
     let geom = match state.views[i].geom_anim {

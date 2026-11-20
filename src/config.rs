@@ -1001,7 +1001,8 @@ impl Config {
 
     /// `<animations enabled="yes" speed="1.0">` et un élément par animation
     /// (`<window-open duration="160" curve="spring" stiffness="600"
-    /// damping="40"/>`, `<menu enabled="no"/>`) (§ 10.5)
+    /// damping="40"/>`, `<menu enabled="no"/>`, `<workspace-switch
+    /// style="fade"/>`) (§ 10.5)
     fn parse_animations(&mut self, r: &mut Reader, section: roxmltree::Node) {
         use crate::anim::{Curve, Kind};
         let a = &mut self.animations;
@@ -1017,6 +1018,17 @@ impl Config {
                 r.unknown(c, "animations");
                 continue;
             };
+            if kind == Kind::WorkspaceSwitch
+                && let Some(v) = c.attribute("style")
+            {
+                match crate::anim::SwitchStyle::parse(v) {
+                    Some(style) => a.switch_style = style,
+                    None => r.warn(
+                        c,
+                        format!("style: slide, fade, zoom ou pull-back attendu, pas « {v} »"),
+                    ),
+                }
+            }
             let mut s = *a.setting_mut(kind);
             r.attr_bool(c, "enabled", &mut s.enabled);
             if let Some(v) = c.attribute("duration") {

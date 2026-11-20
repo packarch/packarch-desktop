@@ -641,7 +641,7 @@ partant de l'état affiché.
 | Maximisation, collage, région | Passage du rectangle de départ au rectangle final, contenu étiré puis remplacé par la nouvelle image du client | 180 ms |
 | Ouverture et fermeture des menus et sous-menus | Fondu et glissement de 4 px | 100 ms |
 | Alt+Tab et OSD | Fondu | 100 ms |
-| Changement de bureau | Glissement horizontal des vues (gauche/droite selon le numéro) | 220 ms |
+| Changement de bureau | Glissement horizontal des vues (gauche/droite selon le numéro) ; autres styles : fondu, zoom, recul (décision 38) | 220 ms |
 | Aperçu de collage | Fondu et croissance du rectangle translucide | 120 ms |
 | Enroulement | Hauteur animée jusqu'à la barre de titre | 140 ms |
 
@@ -662,7 +662,8 @@ partant de l'état affiché.
   du tableau : `window-open`, `window-close`, `minimize`, `maximize`,
   `menu`, `osd`, `workspace-switch`, `snap-preview`, `shade` ; attributs
   `enabled`, `duration`, `curve`, et pour `spring` : `stiffness` (600 par
-  défaut) et `damping` (40).
+  défaut) et `damping` (40). `workspace-switch` a aussi `style` : `slide`
+  (par défaut), `fade`, `zoom`, `pull-back` (décision 38).
 - Désactivées automatiquement avec le backend pixman (pas de GPU) et en
   plein écran direct ; les ombres et coins suivent l'animation.
 - Horloge : celle des rafraîchissements d'écran (presentation feedback),
@@ -1060,5 +1061,14 @@ Décidé le 17 novembre 2026 :
     part ou que l'écran est débranché. Pas de table sous winit ; les
     écrans headless la retiennent sans l'appliquer (scénario
     `tests/scenarios/gamma.txt`, client de test `gamma-essai`).
+38. Styles du changement de bureau (`<workspace-switch style="…">`) :
+    `slide`, le glissement d'un écran de large, reste le défaut ; `fade`,
+    fondu enchaîné sans mouvement ; `zoom`, fondu où l'ancien bureau
+    rétrécit à 94 % et le nouveau grandit de 94 % à 100 %, comme
+    l'ouverture et la fermeture d'une vue ; `pull-back`, les deux bureaux
+    reculent (jusqu'à 86 %), glissent séparés d'un dixième d'écran, puis
+    reviennent à leur taille. L'échelle se fait autour du centre de
+    l'écran de chaque vue ; les vues de tous les bureaux, les barres et le
+    fond ne bougent pas.
 
 Aucune question ouverte pour l'instant.

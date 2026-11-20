@@ -127,6 +127,76 @@ impl Kind {
     }
 }
 
+/// Style du changement de bureau (`<workspace-switch style="…">`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SwitchStyle {
+    /// Glissement horizontal d'un écran de large
+    #[default]
+    Slide,
+    /// Fondu enchaîné, sans mouvement
+    Fade,
+    /// Fondu, l'ancien bureau rétrécit à 94 %, le nouveau grandit de 94 %
+    Zoom,
+    /// Les deux bureaux reculent, glissent, puis reviennent à leur taille
+    PullBack,
+}
+
+/// Apparence d'un bureau pendant le changement
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeskLook {
+    pub alpha: f32,
+    /// Échelle autour du centre de l'écran
+    pub scale: f64,
+    /// Décalage horizontal avant l'échelle, en largeurs d'écran
+    pub shift: f64,
+}
+
+impl SwitchStyle {
+    pub fn parse(s: &str) -> Option<SwitchStyle> {
+        Some(match s.trim().to_ascii_lowercase().as_str() {
+            "slide" => SwitchStyle::Slide,
+            "fade" => SwitchStyle::Fade,
+            "zoom" => SwitchStyle::Zoom,
+            "pull-back" | "pullback" => SwitchStyle::PullBack,
+            _ => return None,
+        })
+    }
+
+    /// Apparence du bureau qui entre (`entering`) ou de celui qui sort, à
+    /// la valeur `p` de l'animation; `dir`: 1 vers un bureau de numéro
+    /// plus grand, -1 sinon
+    pub fn look(self, p: f64, dir: f64, entering: bool) -> DeskLook {
+        let t = p.clamp(0.0, 1.0);
+        // Opacité et progression du bureau: de 0 à 1 pour celui qui entre
+        let q = if entering { t } else { 1.0 - t };
+        // Glissement: le ressort peut dépasser sa cible
+        let slide = if entering { dir * (1.0 - p) } else { -dir * p };
+        match self {
+            SwitchStyle::Slide => DeskLook {
+                alpha: 1.0,
+                scale: 1.0,
+                shift: slide,
+            },
+            SwitchStyle::Fade => DeskLook {
+                alpha: q as f32,
+                scale: 1.0,
+                shift: 0.0,
+            },
+            SwitchStyle::Zoom => DeskLook {
+                alpha: q as f32,
+                scale: lerp(0.94, 1.0, q),
+                shift: 0.0,
+            },
+            // Un espace d'un dixième d'écran sépare les deux bureaux
+            SwitchStyle::PullBack => DeskLook {
+                alpha: 1.0,
+                scale: 1.0 - 0.14 * (std::f64::consts::PI * t).sin(),
+                shift: slide * 1.1,
+            },
+        }
+    }
+}
+
 /// Réglage d'une animation
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Setting {
@@ -142,6 +212,7 @@ pub struct Animations {
     /// Multiplie toutes les durées
     pub speed: f64,
     pub settings: Vec<(Kind, Setting)>,
+    pub switch_style: SwitchStyle,
 }
 
 impl Default for Animations {
@@ -149,6 +220,7 @@ impl Default for Animations {
         Animations {
             enabled: true,
             speed: 1.0,
+            switch_style: SwitchStyle::default(),
             settings: Kind::ALL
                 .into_iter()
                 .map(|k| {
@@ -271,6 +343,38 @@ mod tests {
         }
         assert!(Curve::EaseOutCubic.apply(0.5, 0.1) > 0.5);
         assert!((Curve::EaseInOutCubic.apply(0.5, 0.1) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn switch_styles() {
+        for (name, style) in [
+            ("slide", SwitchStyle::Slide),
+            ("fade", SwitchStyle::Fade),
+            ("Zoom", SwitchStyle::Zoom),
+            ("pull-back", SwitchStyle::PullBack),
+        ] {
+            assert_eq!(SwitchStyle::parse(name), Some(style));
+            // À la fin: le nouveau bureau est en place, l'ancien ne se voit plus
+            let arrived = style.look(1.0, 1.0, true);
+            assert!((arrived.alpha - 1.0).abs() < 1e-6, "{style:?}");
+            assert!(
+                (arrived.scale - 1.0).abs() < 1e-9 && arrived.shift == 0.0,
+                "{style:?}"
+            );
+            let gone = style.look(1.0, 1.0, false);
+            assert!(gone.alpha == 0.0 || gone.shift.abs() >= 1.0, "{style:?}");
+            // Au début: l'ancien bureau est intact
+            let start = style.look(0.0, -1.0, false);
+            assert!(
+                start.alpha == 1.0 && start.scale == 1.0 && start.shift == 0.0,
+                "{style:?}"
+            );
+        }
+        assert_eq!(SwitchStyle::parse("cube"), None);
+        // Le nouveau bureau arrive du côté de son numéro
+        assert!(SwitchStyle::Slide.look(0.25, 1.0, true).shift > 0.0);
+        assert!(SwitchStyle::Slide.look(0.25, -1.0, true).shift < 0.0);
+        assert!(SwitchStyle::PullBack.look(0.5, 1.0, true).scale < 0.9);
     }
 
     #[test]
