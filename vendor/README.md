@@ -35,6 +35,12 @@ Copie de [Smithay](https://github.com/Smithay/smithay) 0.7.0 (licence MIT,
   `ForeignDnd`, offre de glisser-déposer d'une source étrangère (client
   X11) à un client Wayland, sans saisie du pointeur ; réponses par
   `ForeignDndHandler`.
+- `src/xwayland/xwm/mod.rs` (`MapRequest`) : le cadre d'une fenêtre X11 de
+  32 bits (visuel ARGB : terminal transparent, conky…) est créé en 32 bits
+  (visuel et table de couleurs `X11Wm::argb`). Dans un cadre de la
+  profondeur de la racine (24 bits), Xwayland donne à la surface Wayland
+  l'image du cadre, un tampon XRGB : la fenêtre était opaque, noire là où
+  elle devait être transparente.
 
 À retirer quand Smithay gérera le point chaud du plan curseur et le
 glisser-déposer XWayland.

@@ -125,10 +125,11 @@ use x11rb::{
         render::{ConnectionExt as _, CreatePictureAux, PictureWrapper},
         xfixes::{ConnectionExt as _, SelectionEventMask},
         xproto::{
-            Atom, AtomEnum, ChangeWindowAttributesAux, ConfigWindow, ConfigureNotifyEvent,
+            Atom, AtomEnum, ChangeWindowAttributesAux, ColormapAlloc, ConfigWindow, ConfigureNotifyEvent,
             ConfigureWindowAux, ConnectionExt as _, CreateGCAux, CreateWindowAux, CursorWrapper, EventMask,
             FontWrapper, GcontextWrapper, GetPropertyReply, ImageFormat, PixmapWrapper, PropMode, Property,
-            QueryExtensionReply, Screen, SelectionNotifyEvent, SelectionRequestEvent, StackMode, WindowClass,
+            QueryExtensionReply, Screen, SelectionNotifyEvent, SelectionRequestEvent, StackMode, VisualClass,
+            WindowClass,
             CONFIGURE_NOTIFY_EVENT, SELECTION_NOTIFY_EVENT,
         },
         Event,
@@ -490,6 +491,8 @@ pub struct X11Wm {
 
     pub(crate) unpaired_surfaces: HashMap<u64, X11Window>,
     sequences_to_ignore: BinaryHeap<Reverse<u16>>,
+    // packarch: 32-bit visual and its colormap, for the frame of ARGB windows
+    argb: Option<(u32, u32)>,
 
     // selections
     _xfixes_data: QueryExtensionReply,
@@ -986,6 +989,21 @@ impl X11Wm {
         )?;
         debug!(window = win, "Created WM Window");
         let xsettings = XSettings::new(&conn, screen.root_depth, screen.root, &atoms)?;
+        // packarch: 32-bit TrueColor visual of the screen and a colormap for
+        // it: the frame of a 32-bit window gets them (see MapRequest)
+        let argb = screen
+            .allowed_depths
+            .iter()
+            .filter(|d| d.depth == 32)
+            .flat_map(|d| d.visuals.iter())
+            .find(|v| v.class == VisualClass::TRUE_COLOR)
+            .map(|v| v.visual_id)
+            .and_then(|visual| {
+                let colormap = conn.generate_id().ok()?;
+                conn.create_colormap(ColormapAlloc::NONE, colormap, screen.root, visual)
+                    .ok()?;
+                Some((visual, colormap))
+            });
         conn.flush()?;
 
         let conn = Arc::new(conn);
@@ -1028,6 +1046,7 @@ impl X11Wm {
             xdnd,
             unpaired_surfaces: Default::default(),
             sequences_to_ignore: Default::default(),
+            argb,
             windows: Vec::new(),
             client_list: Vec::new(),
             client_list_stacking: Vec::new(),
@@ -1639,6 +1658,21 @@ where
                             | EventMask::SUBSTRUCTURE_REDIRECT
                             | EventMask::PROPERTY_CHANGE,
                     );
+                    // packarch: a 32-bit window (ARGB visual: transparent
+                    // terminals, conky...) gets a 32-bit frame. In a frame of
+                    // the depth of the root (24 bits), Xwayland takes the
+                    // pixmap of the frame for the Wayland surface: an XRGB
+                    // buffer, the window was opaque (black where transparent).
+                    // A window of another visual than its parent needs a
+                    // colormap and a border pixel.
+                    let (frame_depth, frame_visual, win_aux) = match xwm.argb {
+                        Some((visual, colormap)) if geo.depth == 32 => (
+                            32,
+                            visual,
+                            win_aux.colormap(colormap).border_pixel(0).background_pixel(0),
+                        ),
+                        _ => (COPY_DEPTH_FROM_PARENT, x11rb::COPY_FROM_PARENT, win_aux),
+                    };
 
                     {
                         let _guard = scopeguard::guard((), |_| {
@@ -1647,7 +1681,7 @@ where
 
                         conn.grab_server()?;
                         let cookie1 = conn.create_window(
-                            COPY_DEPTH_FROM_PARENT,
+                            frame_depth,
                             frame_win,
                             xwm.screen.root,
                             geo.x,
@@ -1656,7 +1690,7 @@ where
                             geo.height,
                             0,
                             WindowClass::INPUT_OUTPUT,
-                            x11rb::COPY_FROM_PARENT,
+                            frame_visual,
                             &win_aux,
                         )?;
                         let cookie2 = conn.reparent_window(win, frame_win, 0, 0)?;
