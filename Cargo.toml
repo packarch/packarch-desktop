@@ -1,6 +1,6 @@
 [package]
 name = "packarch-desktop"
-version = "1.4.12"
+version = "1.4.13"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Compositeur Wayland à fenêtres flottantes de Packarch"
@@ -64,6 +64,9 @@ name = "fenetres-essai"
 
 [[example]]
 name = "dmabuf-essai"
+
+[[example]]
+name = "gamma-essai"
 
 [profile.release]
 debug = "line-tables-only"

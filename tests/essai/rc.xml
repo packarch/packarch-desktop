@@ -42,5 +42,9 @@
   <keyboard>
     <keybind key="W-space"><action name="ShowMenu" menu="root-menu" /></keybind>
     <keybind key="A-Tab"><action name="NextWindow" /></keybind>
+    <keybind key="W-A-Right"><action name="MoveRelative" x="20" y="0" /></keybind>
+    <keybind key="W-A-Left" repeat="no"><action name="MoveRelative" x="-20" y="0" /></keybind>
+    <keybind key="A-F7"><action name="ToggleShade" /></keybind>
+    <keybind key="A-F8" repeat="yes"><action name="ToggleShade" /></keybind>
   </keyboard>
 </packarch_config>

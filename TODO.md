@@ -67,14 +67,21 @@ corriger. Non relus en détail : `render.rs`, `menu/`, `config.rs`, le patch
 
 - [ ] **Écrans tactiles et tablettes** : événements ignorés (`_ => {}` de
   `process_input`, `src/input.rs`), siège sans `wl_touch`.
-- [ ] **Répétition des raccourcis** : une touche maintenue (volume,
-  `MoveRelative`, `ResizeRelative`) ne déclenche l'action qu'une fois.
-- [ ] **wlr-gamma-control** : gammastep et wlsunset (lumière de nuit) ne
-  peuvent pas marcher ; à ajouter au § 9.2 du cahier des charges.
-- [ ] **`show_window_menu` (xdg-shell)** : le clic droit sur la barre de
-  titre d'une application à GtkHeaderBar n'ouvre pas le menu de fenêtre.
-- [ ] **`fullscreen_request` ignore l'écran demandé**
-  (`src/handlers.rs`).
+- [x] **Répétition des raccourcis** : attribut `repeat` de `<keybind>`,
+  par défaut pour le volume, la luminosité, `MoveRelative`,
+  `ResizeRelative`, `ZoomIn`, `ZoomOut` (décision 35). Scénario
+  `raccourcis`. Non essayé en session réelle.
+- [x] **wlr-gamma-control** : `src/protocols/gamma.rs` (décision 37).
+  Scénario `gamma` sur les écrans headless ; l'écriture DRM
+  (`write_gamma`, `src/backend/udev.rs`) n'a pas été essayée : à faire
+  en session réelle avec gammastep ou wlsunset, sur l'Intel et la NVIDIA,
+  avec un changement de console.
+- [x] **`show_window_menu` (xdg-shell)** : ouvre `client-menu` au point
+  demandé (décision 36). Scénario `raccourcis` ; non essayé avec une
+  application GTK.
+- [x] **`fullscreen_request` suit l'écran demandé** (décision 36), et une
+  fenêtre en plein écran avant son affichage n'est plus replacée
+  (`map_view`). Scénario `raccourcis`.
 - [ ] **wlr-output-management** : rotation (`transform`) et désactivation
   d'un écran refusées (kanshi avec `disable` ou `transform` échoue).
 - [ ] **`--version` sans le commit git**, annoncé au § 12.

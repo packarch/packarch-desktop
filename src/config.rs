@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use crate::actions::{self, Action, line};
-use crate::bindings::{Context, Keybind, Mousebind, parse_combo, parse_keysym};
+use crate::bindings::{Context, Keybind, Mousebind, parse_combo, parse_keysym, repeats_by_default};
 
 /// Police d'une partie du bureau (`<font place="…">`)
 #[derive(Debug, Clone, PartialEq)]
@@ -874,10 +874,13 @@ impl Config {
                             let mut allow = false;
                             r.attr_bool(c, "allowWhenLocked", &mut allow);
                             let actions = actions::parse_children(c, r.warnings);
+                            let mut repeat = repeats_by_default(sym, &actions);
+                            r.attr_bool(c, "repeat", &mut repeat);
                             binds.push(Keybind {
                                 mods,
                                 key: sym,
                                 allow_when_locked: allow,
+                                repeat,
                                 actions,
                             });
                         }

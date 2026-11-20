@@ -14,6 +14,7 @@
 //! click left
 //! key 30                 touche (code evdev), appui puis relâche
 //! keydown 125            touche enfoncée (modificateur…), keyup pour la relâcher
+//! repeat 3               trois répétitions du raccourci tenu (sans attendre)
 //! combo 125 42 3         touches enfoncées dans l'ordre puis relâchées à l'envers
 //! scroll down            un cran de molette (up, down, left, right)
 //! reconfigure            comme SIGHUP
@@ -34,6 +35,8 @@
 //!                        reçoit un rappel de trame à chaque rendu de cet
 //!                        écran ; sinon un par seconde) ; no : aucun ;
 //!                        HEADLESS-2 : cet écran
+//! expect-gamma HEADLESS-1 yes  vérifie que l'écran a la table gamma de
+//!                        gamma-essai (no : aucune table)
 //! output-scale HEADLESS-2 1.5   change l'échelle d'un écran
 //! expect-scale un 1.5    vérifie l'échelle annoncée à la surface de la vue
 //!                        (fractional-scale)
@@ -86,6 +89,8 @@ pub enum Step {
     Click(u32),
     Key(u32),
     KeyState(u32, bool),
+    /// Répétitions du raccourci tenu, sans attendre la minuterie
+    Repeat(u32),
     Combo(Vec<u32>),
     Scroll(f64, f64),
     Reconfigure,
@@ -109,6 +114,8 @@ pub enum Step {
     ExpectFile(PathBuf, u64),
     ExpectLocked(bool),
     ExpectViews(usize),
+    /// Table gamma d'un écran headless: aucune, ou celle de gamma-essai
+    ExpectGamma(String, bool),
     Action(crate::actions::Action),
     ClockFreeze,
     ClockAdvance(u64),
@@ -158,6 +165,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 "key" => Step::Key(num(args.next())? as u32),
                 "keydown" => Step::KeyState(num(args.next())? as u32, true),
                 "keyup" => Step::KeyState(num(args.next())? as u32, false),
+                "repeat" => Step::Repeat(num(args.next())? as u32),
                 "combo" => Step::Combo(
                     args.map(|a| a.parse::<u32>().map_err(|e| e.to_string()))
                         .collect::<Result<_, _>>()?,
@@ -256,6 +264,11 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                     Step::ExpectFile(PathBuf::from(path), t)
                 }
                 "expect-views" => Step::ExpectViews(num(args.next())? as usize),
+                "expect-gamma" => {
+                    let (name, want) = rest.trim().rsplit_once(' ').ok_or("expect-gamma ÉCRAN yes|no")?;
+                    let want = crate::config::parse_bool(want).ok_or("yes ou no")?;
+                    Step::ExpectGamma(name.trim().to_string(), want)
+                }
                 "action" => {
                     let doc = roxmltree::Document::parse(rest).map_err(|e| e.to_string())?;
                     Step::Action(crate::actions::parse(doc.root_element())?)
@@ -384,6 +397,11 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>, min_tolerance:
                 Step::KeyState(code, pressed) => {
                     let t = state.start.elapsed().as_millis() as u32;
                     state.key(Keycode::new(code + 8), pressed, t);
+                }
+                Step::Repeat(n) => {
+                    for _ in 0..n {
+                        state.repeat_key();
+                    }
                 }
                 Step::Combo(codes) => {
                     let t = state.start.elapsed().as_millis() as u32;
@@ -629,6 +647,27 @@ pub fn run(handle: &LoopHandle<'static, State>, steps: Vec<Step>, min_tolerance:
                 Step::ClockRun => {
                     let start = state.start;
                     state.clock.run(start);
+                }
+                Step::ExpectGamma(name, want) => {
+                    let gamma = match state.backend.as_ref() {
+                        Some(Backend::Headless(h)) => h.gamma(&name).map(<[u16]>::to_vec),
+                        _ => None,
+                    };
+                    // Table de gamma-essai: rouge linéaire, vert à moitié, bleu nul
+                    let expected = |g: &[u16]| {
+                        let n = g.len() / 3;
+                        n > 1
+                            && g[n - 1] == 0xffff
+                            && g[2 * n - 1] == 0x7fff
+                            && g[2 * n..].iter().all(|v| *v == 0)
+                    };
+                    match (gamma, want) {
+                        (None, false) => {}
+                        (Some(g), true) if expected(&g) => {}
+                        (Some(_), true) => fail(state, format!("{name}: table gamma inattendue")),
+                        (Some(_), false) => fail(state, format!("{name}: table gamma encore en place")),
+                        (None, true) => fail(state, format!("{name}: pas de table gamma")),
+                    }
                 }
                 Step::Capture(path) => match state.backend.as_mut() {
                     Some(Backend::Headless(h)) => {

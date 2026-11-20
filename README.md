@@ -24,7 +24,7 @@ arrondis et ombrés, thèmes et configuration au format Openbox (`rc.xml`,
   collage, enroulement), menus, OSD, bureaux, aperçu du collage.
 - Session réelle (DRM/KMS, libseat, libinput, plusieurs écrans) ;
   verrouillage, inactivité, barre des tâches et bureaux de waybar, capture,
-  wlr-randr, wlopm, presse-papiers des outils, portails.
+  wlr-randr, wlopm, gammastep, presse-papiers des outils, portails.
 - Loupe (`ZoomIn`, `ZoomOut`, `ToggleMagnify`) : rectangle qui suit le
   pointeur ou tout l'écran.
 

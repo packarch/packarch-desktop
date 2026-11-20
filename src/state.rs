@@ -126,6 +126,11 @@ pub struct State {
     /// Touches dont l'appui a déclenché un raccourci: leur relâche n'est pas
     /// transmise
     pub suppressed_keys: Vec<smithay::input::keyboard::Keycode>,
+    /// Raccourci répété tant que sa touche reste enfoncée (§ 5.3)
+    pub key_repeat: Option<crate::input::KeyRepeat>,
+    /// Numéro de la dernière répétition lancée: une minuterie d'un autre
+    /// numéro s'arrête
+    pub key_repeat_id: u64,
     /// Disposition « us », pour retrouver la touche physique (§ 5.3)
     pub us_keymap: Option<smithay::input::keyboard::xkb::Keymap>,
     /// Aperçu du collage pendant un déplacement (§ 8.6)
@@ -355,6 +360,8 @@ impl State {
             press: None,
             last_click: None,
             suppressed_keys: vec![],
+            key_repeat: None,
+            key_repeat_id: 0,
             us_keymap: us_keymap(),
             snap_preview: None,
             magnifier: None,

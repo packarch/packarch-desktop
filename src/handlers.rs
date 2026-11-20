@@ -329,7 +329,10 @@ impl State {
         let x11_pos = self.views[i].x11().map(|x| x.geometry().loc).filter(|p| {
             *p != Point::from((0, 0)) && self.outputs.iter().any(|o| self.output_geometry(o).contains(*p))
         });
+        // Plein écran demandé avant l'affichage: déjà sur son écran
+        let full = self.views[i].tiling == Tiling::Fullscreen;
         match (x11_pos, self.parent_view(i)) {
+            _ if full => {}
             (Some(p), _) => self.views[i].loc = p,
             (None, Some(parent)) => self.center_on(i, parent),
             (None, None) => self.place_new(i),
@@ -747,13 +750,44 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<wl_output::WlOutput>) {
+    /// Plein écran sur l'écran demandé par le client, sinon sur celui de la
+    /// fenêtre; une fenêtre déjà en plein écran change d'écran
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<wl_output::WlOutput>) {
+        let output = output
+            .as_ref()
+            .and_then(Output::from_resource)
+            .filter(|o| self.outputs.contains(o));
         match self.view_of(&surface) {
-            Some(i) if self.views[i].tiling != Tiling::Fullscreen => self.toggle_fullscreen(i),
+            Some(i) if self.views[i].tiling != Tiling::Fullscreen || output.is_some() => {
+                self.fullscreen(i, output);
+            }
             _ => {
                 surface.send_pending_configure();
             }
         }
+    }
+
+    /// Menu de fenêtre demandé par le client (clic droit sur la barre de
+    /// titre d'une application qui la dessine): celui de `ShowMenu
+    /// client-menu`, au point donné (relatif à la géométrie de la fenêtre).
+    /// Seulement pour la fenêtre active ou celle du clic en cours
+    fn show_window_menu(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: wl_seat::WlSeat,
+        _serial: Serial,
+        location: Point<i32, smithay::utils::Logical>,
+    ) {
+        let Some(i) = self.view_of(&surface) else { return };
+        let pressed = self
+            .press
+            .as_ref()
+            .is_some_and(|p| p.window.as_ref() == Some(&self.views[i].window));
+        if self.is_locked() || !(pressed || self.focused_view() == Some(i)) {
+            return;
+        }
+        let at = self.views[i].loc + location;
+        self.show_menu_at(crate::menu::CLIENT, true, Some(i), Some(at));
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {

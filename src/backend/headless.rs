@@ -34,6 +34,37 @@ struct Screen {
     damage: OutputDamageTracker,
     target: GlesTexture,
     size: Size<i32, Physical>,
+    /// Table gamma reçue d'un client (retenue, sans effet sur l'image)
+    gamma: Option<Vec<u16>>,
+}
+
+/// Taille d'une rampe gamma des écrans headless
+const GAMMA_SIZE: u32 = 256;
+
+impl Headless {
+    pub fn gamma_size(&self, output: &Output) -> Option<u32> {
+        self.screens
+            .iter()
+            .any(|s| s.output == *output)
+            .then_some(GAMMA_SIZE)
+    }
+
+    pub fn set_gamma(&mut self, output: &Output, ramps: Option<&[u16]>) -> bool {
+        let Some(s) = self.screens.iter_mut().find(|s| s.output == *output) else {
+            return false;
+        };
+        if ramps.is_some_and(|r| r.len() != GAMMA_SIZE as usize * 3) {
+            return false;
+        }
+        s.gamma = ramps.map(<[u16]>::to_vec);
+        true
+    }
+
+    /// Table gamma en cours d'un écran, par son nom (scénarios)
+    pub fn gamma(&self, name: &str) -> Option<&[u16]> {
+        let s = self.screens.iter().find(|s| s.output.name() == name)?;
+        s.gamma.as_deref()
+    }
 }
 
 /// `count` écrans de `size`, posés côte à côte de gauche à droite
@@ -82,6 +113,7 @@ pub fn init(
             damage,
             target,
             size,
+            gamma: None,
         });
     }
     init_renderer(state, &mut renderer);

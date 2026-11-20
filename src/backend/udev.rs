@@ -64,6 +64,26 @@ struct Surface {
     scheduled: bool,
     /// Fréquence variable possible (VRR_CAPABLE du connecteur)
     vrr: VrrSupport,
+    /// Table gamma d'un client (wlr-gamma-control), remise après un
+    /// changement de console
+    gamma: Option<Vec<u16>>,
+}
+
+/// Écrit la table gamma d'un contrôleur: `ramps` (rouge, vert, bleu à la
+/// suite), ou la table linéaire
+fn write_gamma(drm: &DrmDevice, crtc: crtc::Handle, ramps: Option<&[u16]>) -> std::io::Result<()> {
+    let n = drm.get_crtc(crtc)?.gamma_length() as usize;
+    if n == 0 {
+        return Err(std::io::ErrorKind::Unsupported.into());
+    }
+    match ramps {
+        Some(r) if r.len() == n * 3 => drm.set_gamma(crtc, &r[..n], &r[n..2 * n], &r[2 * n..]),
+        Some(_) => Err(std::io::ErrorKind::InvalidInput.into()),
+        None => {
+            let linear: Vec<u16> = (0..n).map(|i| (i * 0xffff / (n - 1).max(1)) as u16).collect();
+            drm.set_gamma(crtc, &linear, &linear, &linear)
+        }
+    }
 }
 
 pub struct Udev {
@@ -121,6 +141,29 @@ impl Udev {
             s.queued = false;
         } else if let Err(e) = s.compositor.reset_state() {
             warn!("{}: {e}", output.name());
+        }
+    }
+
+    /// Nombre de valeurs d'une rampe gamma de l'écran
+    pub fn gamma_size(&self, output: &Output) -> Option<u32> {
+        let (crtc, _) = self.surfaces.iter().find(|(_, s)| s.output == *output)?;
+        self.drm.get_crtc(*crtc).ok().map(|c| c.gamma_length())
+    }
+
+    /// Table gamma de l'écran (`None`: linéaire)
+    pub fn set_gamma(&mut self, output: &Output, ramps: Option<&[u16]>) -> bool {
+        let Some((crtc, s)) = self.surfaces.iter_mut().find(|(_, s)| s.output == *output) else {
+            return false;
+        };
+        match write_gamma(&self.drm, *crtc, ramps) {
+            Ok(()) => {
+                s.gamma = ramps.map(<[u16]>::to_vec);
+                true
+            }
+            Err(e) => {
+                warn!("{}: table gamma: {e}", output.name());
+                false
+            }
         }
     }
 
@@ -330,13 +373,22 @@ impl State {
             .filter(|(_, s)| !connected.iter().any(|c| c.handle() == s.connector))
             .map(|(c, _)| *c)
             .collect();
+        let mut removed = vec![];
         for crtc in gone {
             if let Some(s) = u.surfaces.remove(&crtc) {
                 info!("écran débranché: {}", s.output.name());
+                // Le contrôleur resservira à un autre écran: table d'origine
+                if s.gamma.is_some() {
+                    let _ = write_gamma(&u.drm, crtc, None);
+                }
                 self.dh.remove_global::<State>(s.global);
                 layer_map_for_output(&s.output).cleanup();
                 self.outputs.retain(|o| *o != s.output);
+                removed.push(s.output);
             }
+        }
+        for output in &removed {
+            self.gamma_output_removed(output);
         }
         // Branchés
         for info in connected {
@@ -471,6 +523,7 @@ impl State {
                     dirty: true,
                     scheduled: false,
                     vrr,
+                    gamma: None,
                 },
             );
         }
@@ -644,6 +697,8 @@ impl State {
     }
 
     fn udev_session(&mut self, event: SessionEvent) {
+        // Changement de console: la relâche de la touche peut manquer
+        self.key_repeat = None;
         let Some(u) = self.udev() else { return };
         match event {
             SessionEvent::PauseSession => {
@@ -666,6 +721,12 @@ impl State {
                     }
                     s.queued = false;
                     s.dirty = true;
+                    // La table gamma a pu être changée par l'autre session
+                    if s.gamma.is_some()
+                        && let Err(e) = write_gamma(&u.drm, *crtc, s.gamma.as_deref())
+                    {
+                        warn!("{}: table gamma: {e}", s.output.name());
+                    }
                     crtcs.push(*crtc);
                 }
                 self.udev_scan();

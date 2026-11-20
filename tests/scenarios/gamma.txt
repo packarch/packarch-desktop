@@ -1,0 +1,30 @@
+# wlr-gamma-control (§ 9.2) : un client donne une table gamma à chaque
+# écran (gammastep, wlsunset) ; quand il part, la table d'origine revient.
+# Un second client sur un écran déjà réglé est refusé, une table de la
+# mauvaise taille aussi. Les écrans headless retiennent la table sans
+# l'appliquer. Sans capture.
+#reference
+#! --no-animations --outputs 2
+wait 300
+expect-gamma HEADLESS-1 no
+spawn gamma-essai --duration 1500
+wait 600
+expect-gamma HEADLESS-1 yes
+expect-gamma HEADLESS-2 yes
+# Second client : refusé (code 4), la table du premier reste
+spawn sh -c 'gamma-essai --duration 100; echo $? >second.txt'
+expect-file second.txt 3000
+spawn sh -c 'test "$(cat second.txt)" = 4 && touch refuse.txt'
+expect-file refuse.txt 3000
+expect-gamma HEADLESS-1 yes
+# Le premier client part : table d'origine
+wait 1400
+expect-gamma HEADLESS-1 no
+expect-gamma HEADLESS-2 no
+# Table trop courte : erreur de protocole (code 3), rien n'est appliqué
+spawn sh -c 'gamma-essai --short yes --duration 100; echo $? >courte.txt'
+expect-file courte.txt 3000
+spawn sh -c 'test "$(cat courte.txt)" = 3 && touch erreur.txt'
+expect-file erreur.txt 3000
+expect-gamma HEADLESS-1 no
+quit

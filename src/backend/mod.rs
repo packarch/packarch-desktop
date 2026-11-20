@@ -47,6 +47,26 @@ impl Backend {
             Backend::Udev(u) => &mut u.renderer,
         }
     }
+
+    /// Nombre de valeurs d'une rampe de la table gamma d'un écran
+    /// (wlr-gamma-control); aucune sous winit
+    pub fn gamma_size(&self, output: &Output) -> Option<u32> {
+        match self {
+            Backend::Winit(_) => None,
+            Backend::Headless(h) => h.gamma_size(output),
+            Backend::Udev(u) => u.gamma_size(output),
+        }
+    }
+
+    /// Table gamma d'un écran: rampes rouge, verte et bleue à la suite, ou
+    /// `None` pour la table linéaire d'origine
+    pub fn set_gamma(&mut self, output: &Output, ramps: Option<&[u16]>) -> bool {
+        match self {
+            Backend::Winit(_) => false,
+            Backend::Headless(h) => h.set_gamma(output, ramps),
+            Backend::Udev(u) => u.set_gamma(output, ramps),
+        }
+    }
 }
 
 /// Préparation commune: shaders, dmabuf (v4 avec retour si le nœud de rendu

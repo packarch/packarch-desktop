@@ -2,7 +2,7 @@
 //! Entrées (cahier des charges § 5.3, § 5.4, § 8.6, § 8.7): raccourcis
 //! clavier, liaisons de la souris, déplacement et redimensionnement.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GestureBeginEvent, GestureEndEvent,
@@ -17,9 +17,11 @@ use smithay::input::pointer::{
     GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab,
     PointerInnerHandle, RelativeMotionEvent,
 };
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER, Size};
+use tracing::warn;
 
 use crate::actions::Action;
 use crate::bindings::{Context, Mods, MouseButton, MouseEvent, ScrollDir, find_keybind};
@@ -71,9 +73,18 @@ fn contexts(under: &Under) -> (Vec<Context>, Option<usize>) {
     }
 }
 
+/// Raccourci répété tant que sa touche reste enfoncée
+pub struct KeyRepeat {
+    id: u64,
+    actions: Vec<Action>,
+    /// Raccourci `allowWhenLocked`
+    locked: bool,
+}
+
 /// Résultat du filtre du clavier
 enum KeyResult {
-    Bind(Vec<Action>),
+    /// Actions d'un raccourci; répété, et permis pendant le verrouillage
+    Bind(Vec<Action>, bool, bool),
     /// Touche pour le menu ouvert, et le raccourci qu'elle déclencherait
     Menu(Keysym, Option<char>, Option<Vec<Action>>),
     CancelCycle,
@@ -340,6 +351,8 @@ impl State {
             KeyState::Released
         };
         self.activity();
+        // Toute touche, appuyée ou relâchée, arrête la répétition en cours
+        self.key_repeat = None;
         let serial = SERIAL_COUNTER.next_serial();
         let menu_open = self.menu.is_some();
         let cycling = self.cycle.is_some();
@@ -390,7 +403,7 @@ impl State {
             let bind = find_keybind(&st.config.keybinds, Mods::from_state(mods), &translated, physical)
                 .filter(|b| !locked || b.allow_when_locked)
                 .filter(|b| !st.keybinds_off || b.actions.contains(&Action::ToggleKeybinds))
-                .map(|b| b.actions.clone());
+                .map(|b| (b.actions.clone(), b.repeat, b.allow_when_locked));
             if menu_open && !locked {
                 // Menu ouvert: les touches lui reviennent, sauf les
                 // modificateurs; un raccourci ferme le menu
@@ -399,18 +412,24 @@ impl State {
                     return FilterResult::Forward;
                 }
                 st.suppressed_keys.push(code);
+                let bind = bind.map(|(actions, ..)| actions);
                 return FilterResult::Intercept(Some(KeyResult::Menu(sym, sym.key_char(), bind)));
             }
             match bind {
-                Some(actions) => {
+                Some((actions, repeat, allow)) => {
                     st.suppressed_keys.push(code);
-                    FilterResult::Intercept(Some(KeyResult::Bind(actions)))
+                    FilterResult::Intercept(Some(KeyResult::Bind(actions, repeat, allow)))
                 }
                 None => FilterResult::Forward,
             }
         });
         let actions = match result {
-            Some(Some(KeyResult::Bind(actions))) => Some(actions),
+            Some(Some(KeyResult::Bind(actions, repeat, allow))) => {
+                if repeat {
+                    self.start_key_repeat(actions.clone(), allow);
+                }
+                Some(actions)
+            }
             Some(Some(KeyResult::Vt(vt))) => {
                 self.change_vt(vt);
                 None
@@ -440,20 +459,66 @@ impl State {
             _ => None,
         };
         if let Some(actions) = actions {
-            let target = self.focused_view().map(|i| self.views[i].window.clone());
-            self.run_actions(
-                &actions,
-                target,
-                Origin {
-                    button: None,
-                    location: self.pointer,
-                },
-            );
+            self.run_key_actions(&actions);
         }
         // Alt+Tab: fini quand plus aucun modificateur n'est enfoncé
         if self.cycle.is_some() && self.mods().is_empty() {
             self.end_cycle();
         }
+    }
+
+    /// Actions d'un raccourci, sur la vue qui a le clavier
+    fn run_key_actions(&mut self, actions: &[Action]) {
+        let target = self.focused_view().map(|i| self.views[i].window.clone());
+        self.run_actions(
+            actions,
+            target,
+            Origin {
+                button: None,
+                location: self.pointer,
+            },
+        );
+    }
+
+    /// Répète un raccourci tant que sa touche reste enfoncée, au délai et
+    /// au rythme du clavier (`repeatDelay`, `repeatRate`); toute touche
+    /// l'arrête (`key`)
+    fn start_key_repeat(&mut self, actions: Vec<Action>, locked: bool) {
+        let (delay, rate) = (self.config.repeat_delay, self.config.repeat_rate);
+        if delay <= 0 || rate <= 0 {
+            return;
+        }
+        self.key_repeat_id += 1;
+        let id = self.key_repeat_id;
+        self.key_repeat = Some(KeyRepeat { id, actions, locked });
+        let period = Duration::from_secs_f64(1.0 / rate as f64);
+        let timer = Timer::from_duration(Duration::from_millis(delay as u64));
+        let inserted = self.handle.insert_source(timer, move |_, _, state| {
+            if state.key_repeat.as_ref().is_some_and(|r| r.id == id) && state.repeat_key() {
+                TimeoutAction::ToDuration(period)
+            } else {
+                TimeoutAction::Drop
+            }
+        });
+        if let Err(e) = inserted {
+            warn!("répétition du raccourci: {e}");
+            self.key_repeat = None;
+        }
+    }
+
+    /// Une répétition du raccourci tenu; `false` s'il n'y en a pas, ou plus
+    /// (menu ouvert, session verrouillée, raccourcis désactivés)
+    pub fn repeat_key(&mut self) -> bool {
+        let Some(repeat) = &self.key_repeat else {
+            return false;
+        };
+        if self.menu.is_some() || self.keybinds_off || (self.is_locked() && !repeat.locked) {
+            self.key_repeat = None;
+            return false;
+        }
+        let actions = repeat.actions.clone();
+        self.run_key_actions(&actions);
+        true
     }
 
     pub fn pointer_motion(&mut self, pos: Point<f64, Logical>, time: u32) {

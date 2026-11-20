@@ -6,7 +6,13 @@
 //!
 //! ```text
 //! client-essai [--title TITRE] [--size LxH] [--color RRGGBB] [--app-id ID]
+//!              [--fullscreen ÉCRAN] [--window-menu yes]
 //! ```
+//!
+//! `--fullscreen HEADLESS-2` demande le plein écran sur cet écran avant
+//! d'afficher la fenêtre. `--window-menu yes` : un clic droit demande le
+//! menu de fenêtre au compositeur (xdg_toplevel.show_window_menu), comme une
+//! application qui dessine sa barre de titre.
 //!
 //! La taille proposée par le compositeur (maximisation, collage…) remplace
 //! celle de `--size` ; 0 × 0 la rétablit. Le client quitte quand on ferme la
@@ -14,8 +20,10 @@
 
 use std::os::fd::{AsFd, FromRawFd, OwnedFd};
 
-use wayland_client::protocol::{wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface};
-use wayland_client::{Connection, Dispatch, QueueHandle, delegate_noop};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+};
+use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, delegate_noop};
 use wayland_protocols::xdg::decoration::zv1::client::{
     zxdg_decoration_manager_v1::ZxdgDecorationManagerV1,
     zxdg_toplevel_decoration_v1::{self, ZxdgToplevelDecorationV1},
@@ -35,6 +43,14 @@ struct Client {
     pending: (i32, i32),
     color: u32,
     closed: bool,
+    /// Écrans et leurs noms (`--fullscreen`)
+    outputs: Vec<(wl_output::WlOutput, String)>,
+    seat: Option<wl_seat::WlSeat>,
+    toplevel: Option<xdg_toplevel::XdgToplevel>,
+    /// `--window-menu` : le clic droit demande le menu de fenêtre
+    window_menu: bool,
+    /// Position du pointeur sur la surface
+    pointer: (f64, f64),
 }
 
 impl Client {
@@ -93,6 +109,15 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Client {
                 "wl_shm" => state.shm = Some(registry.bind(name, 1, qh, ())),
                 "xdg_wm_base" => state.wm_base = Some(registry.bind(name, 1, qh, ())),
                 "zxdg_decoration_manager_v1" => state.decoration = Some(registry.bind(name, 1, qh, ())),
+                "wl_output" => {
+                    let output = registry.bind(name, 4, qh, ());
+                    state.outputs.push((output, String::new()));
+                }
+                "wl_seat" if state.window_menu => {
+                    let seat: wl_seat::WlSeat = registry.bind(name, 5, qh, ());
+                    seat.get_pointer(qh, ());
+                    state.seat = Some(seat);
+                }
                 _ => {}
             }
         }
@@ -174,6 +199,56 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for Client {
     }
 }
 
+impl Dispatch<wl_output::WlOutput, ()> for Client {
+    fn event(
+        state: &mut Self,
+        output: &wl_output::WlOutput,
+        event: wl_output::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_output::Event::Name { name } = event
+            && let Some(o) = state.outputs.iter_mut().find(|(o, _)| o == output)
+        {
+            o.1 = name;
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter {
+                surface_x, surface_y, ..
+            }
+            | wl_pointer::Event::Motion {
+                surface_x, surface_y, ..
+            } => state.pointer = (surface_x, surface_y),
+            // BTN_RIGHT
+            wl_pointer::Event::Button {
+                serial,
+                button: 0x111,
+                state: WEnum::Value(wl_pointer::ButtonState::Pressed),
+                ..
+            } => {
+                if let (Some(toplevel), Some(seat)) = (&state.toplevel, &state.seat) {
+                    toplevel.show_window_menu(seat, serial, state.pointer.0 as i32, state.pointer.1 as i32);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(Client: ignore wl_seat::WlSeat);
 delegate_noop!(Client: ignore wl_compositor::WlCompositor);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
 delegate_noop!(Client: ignore wl_shm::WlShm);
@@ -181,13 +256,17 @@ delegate_noop!(Client: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore ZxdgDecorationManagerV1);
 
 fn usage() -> ! {
-    eprintln!("client-essai [--title TITRE] [--size LxH] [--color RRGGBB] [--app-id ID]");
+    eprintln!(
+        "client-essai [--title TITRE] [--size LxH] [--color RRGGBB] [--app-id ID] [--fullscreen ÉCRAN] \
+         [--window-menu yes]"
+    );
     std::process::exit(2);
 }
 
 fn main() {
     let mut title = "essai".to_string();
     let mut app_id = "client-essai".to_string();
+    let mut fullscreen = None;
     let mut client = Client {
         size: (400, 300),
         color: 0x3a6ea5,
@@ -198,6 +277,8 @@ fn main() {
         let value = args.next().unwrap_or_else(|| usage());
         match arg.as_str() {
             "--title" => title = value,
+            "--fullscreen" => fullscreen = Some(value),
+            "--window-menu" => client.window_menu = value == "yes",
             "--app-id" => app_id = value,
             "--size" => {
                 let (w, h) = value.split_once('x').unwrap_or_else(|| usage());
@@ -242,6 +323,19 @@ fn main() {
         let deco = manager.get_toplevel_decoration(&toplevel, &qh, ());
         deco.set_mode(zxdg_toplevel_decoration_v1::Mode::ServerSide);
     }
+    if let Some(name) = fullscreen {
+        // Second aller-retour : noms des écrans
+        if let Err(e) = queue.roundtrip(&mut client) {
+            eprintln!("client-essai: {e}");
+            std::process::exit(1);
+        }
+        let Some((output, _)) = client.outputs.iter().find(|(_, n)| *n == name) else {
+            eprintln!("client-essai: pas d'écran « {name} »");
+            std::process::exit(1);
+        };
+        toplevel.set_fullscreen(Some(output));
+    }
+    client.toplevel = Some(toplevel.clone());
     client.surface = Some(surface.clone());
     surface.commit();
     while !client.closed {

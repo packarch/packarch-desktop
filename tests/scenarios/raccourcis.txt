@@ -1,0 +1,66 @@
+# Répétition des raccourcis (§ 5.3), menu de fenêtre demandé par le client
+# (xdg_toplevel.show_window_menu) et plein écran sur l'écran demandé
+# (xdg_toplevel.set_fullscreen). Sans capture : des vérifications seulement.
+#reference
+#! --no-animations --outputs 2
+wait 300
+spawn client-essai --title un --size 500x340 --color 3a6ea5 --window-menu yes
+wait-views 1 5000
+wait 200
+expect-focus un
+# --- Répétition ---
+# W-A-Right (MoveRelative) se répète par défaut tant que la touche est tenue
+mark un
+keydown 125
+keydown 56
+keydown 106
+expect-moved un 20 0
+repeat 3
+expect-moved un 80 0
+# Touche relâchée : plus de répétition
+keyup 106
+repeat 2
+expect-moved un 80 0
+# W-A-Left avec repeat="no" : une seule fois
+keydown 105
+repeat 3
+expect-moved un 60 0
+keyup 105
+keyup 56
+keyup 125
+# A-F7 (ToggleShade) ne se répète pas par défaut ; A-F8 a repeat="yes"
+keydown 56
+keydown 65
+repeat 1
+expect-shaded un yes
+keyup 65
+keydown 66
+expect-shaded un no
+repeat 1
+expect-shaded un yes
+# Une autre touche arrête la répétition
+keydown 42
+repeat 1
+expect-shaded un yes
+keyup 42
+keyup 66
+keyup 56
+action <action name="Unshade"/>
+# --- Menu de fenêtre demandé par le client ---
+point un client
+press right
+wait 200
+expect-menu client-menu
+release right
+wait 100
+expect-menu client-menu
+key 1
+wait 100
+expect-menu none
+# --- Plein écran sur l'écran demandé ---
+# Le pointeur est sur le premier écran ; la fenêtre s'ouvre sur le second
+spawn client-essai --title plein --size 300x200 --color a53a3a --fullscreen HEADLESS-2
+wait-views 2 5000
+wait 300
+expect plein 1280 0 1280 800
+quit

@@ -609,14 +609,28 @@ impl State {
     pub fn toggle_fullscreen(&mut self, i: usize) {
         if self.views[i].tiling == Tiling::Fullscreen {
             self.restore(i);
-            return;
+        } else {
+            self.fullscreen(i, Option::None);
         }
+    }
+
+    /// Plein écran sur `output`, sinon sur l'écran où est le centre du
+    /// cadre. Une vue déjà en plein écran y est seulement déplacée
+    pub fn fullscreen(&mut self, i: usize, output: Option<Output>) {
         let frame = self.frame_rect(i);
         let center = frame.loc.to_f64() + frame.size.to_f64().to_point().downscale(2.0);
-        let Some(output) = self.output_at(center) else {
+        let Some(output) = output.or_else(|| self.output_at(center)) else {
             return;
         };
         let rect = self.output_geometry(&output);
+        if self.views[i].tiling == Tiling::Fullscreen {
+            if self.views[i].loc != rect.loc || frame.size != rect.size {
+                self.views[i].loc = rect.loc;
+                self.configure(i, Some(rect.size));
+            }
+            self.raise(i);
+            return;
+        }
         if self.views[i].tiling == Tiling::None {
             let geo = self.views[i].window.geometry();
             self.views[i].saved = Some(Rectangle::new(self.views[i].loc, geo.size));
@@ -1475,6 +1489,7 @@ impl State {
         if self.no_animations {
             self.config.animations.enabled = false;
         }
+        self.key_repeat = None;
         self.theme = Theme::load(&self.config);
         self.close_menus();
         self.reload_menus();

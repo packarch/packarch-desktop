@@ -5,6 +5,7 @@
 //! Smithay ne fournit pas sont dans les sous-modules.
 
 pub mod foreign_toplevel;
+pub mod gamma;
 pub mod image_capture;
 pub mod outputs;
 pub mod screencopy;
@@ -115,6 +116,7 @@ pub struct Protocols {
     pub screencopy: screencopy::Screencopy,
     pub image_capture: image_capture::ImageCapture,
     pub outputs: outputs::OutputTools,
+    pub gamma: gamma::Gamma,
 }
 
 impl Protocols {
@@ -124,6 +126,7 @@ impl Protocols {
         primary: &smithay::wayland::selection::primary_selection::PrimarySelectionState,
     ) -> Protocols {
         virtual_pointer::init(dh);
+        gamma::init(dh);
         Protocols {
             session_lock: SessionLockManagerState::new::<State, _>(dh, trusted),
             idle_notifier: IdleNotifierState::new(dh, handle.clone()),
@@ -151,6 +154,7 @@ impl Protocols {
             screencopy: screencopy::Screencopy::new(dh),
             image_capture: image_capture::ImageCapture::new(dh),
             outputs: outputs::OutputTools::new(dh),
+            gamma: gamma::Gamma::default(),
         }
     }
 }

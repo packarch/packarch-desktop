@@ -20,7 +20,7 @@ des animations sobres. Sa configuration reprend le format d'Openbox :
 .PP
 Les applications X11 fonctionnent par XWayland. Les outils Wayland
 habituels (waybar, rofi, mako, swaybg, swayidle, hyprlock, grim,
-wlr\-randr, wlopm, wl\-clipboard) sont pris en charge.
+wlr\-randr, wlopm, gammastep, wl\-clipboard) sont pris en charge.
 .SH OPTIONS
 .TP
 .BI \-C ", " \-\-config\-dir " DOSSIER"
@@ -219,9 +219,13 @@ Attributs
 .TP
 .B keyboard
 .BR numlock ", " repeatRate ", " repeatDelay ", "
-.BR keybind\ key= "W-S-Return " allowWhenLocked= "yes|no "
+.BR keybind\ key= "W-S-Return " allowWhenLocked= "yes|no " repeat= "yes|no "
 contenant des
 .BR <action> .
+.B repeat
+répète le raccourci tant que la touche reste enfoncée ; par défaut : oui
+pour le volume, la luminosité, MoveRelative, ResizeRelative, ZoomIn et
+ZoomOut.
 Modificateurs :
 .BR W " (Super), " A " (Alt), " C " (Ctrl), " S " (Maj), " M " (AltGr), " H " (Hyper)."
 Sur un clavier AZERTY, un raccourci écrit avec un chiffre marche sans Maj.

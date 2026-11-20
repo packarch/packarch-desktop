@@ -231,6 +231,11 @@ marqués **P**, ils sont prioritaires) :
   keysym du niveau 1 de la disposition `us` pour ce code de touche).
 - `allowWhenLocked="yes"` : actif aussi pendant le verrouillage (volume,
   luminosité).
+- `repeat="yes|no"` : le raccourci se répète tant que la touche reste
+  enfoncée, au délai et au rythme du clavier (`repeatDelay`, `repeatRate`).
+  Sans l'attribut : oui pour les touches de volume et de luminosité, et
+  quand toutes les actions sont des pas (`MoveRelative`, `ResizeRelative`,
+  `ZoomIn`, `ZoomOut`) ; non pour le reste (décision 35).
 - Les raccourcis sont prioritaires sur le client, sauf pendant le
   verrouillage et quand un client a demandé l'inhibition des raccourcis
   (protocole keyboard-shortcuts-inhibit), avec une échappatoire fixe : Super+Échap.
@@ -528,6 +533,7 @@ priorité 3, § 15).
 | wlr-screencopy, ext-image-capture-source, ext-image-copy-capture | grim, wf-recorder, hyprpicker |
 | wlr-output-management | wlr-randr, kanshi |
 | wlr-output-power-management | wlopm (extinction des écrans) |
+| wlr-gamma-control | gammastep, wlsunset (lumière de nuit) |
 | wlr-data-control, ext-data-control | wl-copy, gestionnaires de presse-papiers |
 | xdg-activation | Focus entre applications (liens, notifications) |
 | pointer-constraints, relative-pointer | Jeux (packarch-spider, etc.) |
@@ -730,7 +736,9 @@ packarch [OPTIONS]
   référence (décision 16). Cas : menu racine ouvert, sous-menu, Alt+Tab,
   fenêtre maximisée, coins et ombres à l'échelle 1 et 1,5, rythme des
   clients sur un et deux écrans, pointeur virtuel, capture d'écran et de
-  fenêtre par grim, capture dans un dmabuf (`dmabuf-essai`).
+  fenêtre par grim, capture dans un dmabuf (`dmabuf-essai`), répétition
+  des raccourcis, menu de fenêtre et plein écran demandés par le client,
+  table gamma (`gamma-essai`).
 - **Essais réels** : sur la machine de développement en session imbriquée
   (winit), puis sur packarch-test en session complète.
 - **CI** : `cargo fmt --check`, `cargo clippy -- -D warnings`,
@@ -1026,5 +1034,31 @@ Décidé le 17 novembre 2026 :
     prochain événement X11 traité, et un client qui lisait tout de suite
     trouvait une sélection sans propriétaire. Scénario
     `tests/scenarios/presse-papiers.txt` (client `presse-papiers-x11`).
+35. Répétition des raccourcis : attribut `repeat` de `<keybind>` (§ 5.3).
+    Par défaut, seuls se répètent les raccourcis dont la répétition ne
+    surprend pas : touches `XF86AudioRaiseVolume`, `XF86AudioLowerVolume`,
+    `XF86MonBrightnessUp`, `XF86MonBrightnessDown`, `XF86KbdBrightnessUp`,
+    `XF86KbdBrightnessDown`, et raccourcis faits seulement de
+    `MoveRelative`, `ResizeRelative`, `ZoomIn`, `ZoomOut`. Tout répéter,
+    comme labwc, ouvrirait une rangée de terminaux en tenant `W-Return`.
+    Toute touche appuyée ou relâchée arrête la répétition, comme
+    l'ouverture d'un menu, le verrouillage (sauf `allowWhenLocked`), le
+    rechargement et le changement de console. Scénario
+    `tests/scenarios/raccourcis.txt` (étape `repeat`).
+36. Requêtes xdg-shell : `show_window_menu` ouvre le menu `client-menu`
+    au point donné, pour la fenêtre active ou celle du clic en cours
+    (clic droit sur la barre de titre d'une application à GtkHeaderBar) ;
+    `set_fullscreen` avec un écran met la fenêtre en plein écran sur cet
+    écran, même avant son affichage, et déplace une fenêtre déjà en plein
+    écran.
+37. wlr-gamma-control v1 (`src/protocols/gamma.rs`) : réservé aux clients
+    de confiance, un seul client par écran (les suivants reçoivent
+    `failed`). La table est écrite par l'appel DRM historique
+    (`drmModeCrtcSetGamma`), que le noyau traduit en propriété `GAMMA_LUT`
+    pour les pilotes atomiques ; elle est remise au retour d'un
+    changement de console, et la table linéaire revient quand le client
+    part ou que l'écran est débranché. Pas de table sous winit ; les
+    écrans headless la retiennent sans l'appliquer (scénario
+    `tests/scenarios/gamma.txt`, client de test `gamma-essai`).
 
 Aucune question ouverte pour l'instant.

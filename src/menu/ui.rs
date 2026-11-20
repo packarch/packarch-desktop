@@ -166,6 +166,18 @@ fn run_pipe(mut cmd: std::process::Command) -> Option<String> {
 impl State {
     /// Ouvre un menu (action ShowMenu); `target`: vue visée
     pub fn show_menu(&mut self, id: &str, at_cursor: bool, target: Option<usize>) {
+        self.show_menu_at(id, at_cursor, target, None);
+    }
+
+    /// Ouvre un menu au point `place`, s'il est donné (menu de fenêtre
+    /// demandé par le client, xdg_toplevel.show_window_menu)
+    pub fn show_menu_at(
+        &mut self,
+        id: &str,
+        at_cursor: bool,
+        target: Option<usize>,
+        place: Option<Point<i32, Logical>>,
+    ) {
         self.close_menus();
         let mut store = self.menus.clone();
         if id == CLIENT && !store.map.contains_key(CLIENT) {
@@ -199,13 +211,13 @@ impl State {
         };
         let execute = menu.execute.clone();
         // atCursor="no": sous la barre de titre de la vue
-        let at = match target.filter(|_| !at_cursor) {
+        let at = match target.filter(|_| !at_cursor && place.is_none()) {
             Some(i) => {
                 let layout = self.layout(&self.views[i]);
                 let frame = self.frame_rect(i);
                 frame.loc + Point::from((0, layout.border + layout.title_height))
             }
-            None => self.pointer.to_i32_round(),
+            None => place.unwrap_or_else(|| self.pointer.to_i32_round()),
         };
         let held = self.press.as_ref().is_some_and(|p| !p.intercepted && !p.dragged);
         self.menu = Some(MenuState {

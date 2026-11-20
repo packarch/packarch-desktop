@@ -87,7 +87,35 @@ pub struct Keybind {
     /// Actif pendant le verrouillage (ext-session-lock, 0.4)
     #[allow(dead_code)]
     pub allow_when_locked: bool,
+    /// Répété tant que la touche reste enfoncée
+    pub repeat: bool,
     pub actions: Vec<Action>,
+}
+
+/// Un raccourci sans attribut `repeat` se répète-t-il : oui pour les touches
+/// de volume et de luminosité, et quand toutes ses actions sont des pas
+/// (`MoveRelative`, `ResizeRelative`, `ZoomIn`, `ZoomOut`)
+pub fn repeats_by_default(key: Keysym, actions: &[Action]) -> bool {
+    use crate::magnifier::ZoomAction;
+    let step_key = matches!(
+        key,
+        Keysym::XF86_AudioRaiseVolume
+            | Keysym::XF86_AudioLowerVolume
+            | Keysym::XF86_MonBrightnessUp
+            | Keysym::XF86_MonBrightnessDown
+            | Keysym::XF86_KbdBrightnessUp
+            | Keysym::XF86_KbdBrightnessDown
+    );
+    let steps = !actions.is_empty()
+        && actions.iter().all(|a| {
+            matches!(
+                a,
+                Action::MoveRelative { .. }
+                    | Action::ResizeRelative { .. }
+                    | Action::Zoom(ZoomAction::In | ZoomAction::Out)
+            )
+        });
+    step_key || steps
 }
 
 /// Trouve le raccourci d'une touche. D'abord par le keysym de la disposition
@@ -333,8 +361,24 @@ mod tests {
             mods,
             key: parse_keysym(key).unwrap(),
             allow_when_locked: false,
+            repeat: false,
             actions: vec![],
         }
+    }
+
+    #[test]
+    fn repeat_default() {
+        let step = Action::MoveRelative { x: 20, y: 0 };
+        assert!(repeats_by_default(Keysym::Right, std::slice::from_ref(&step)));
+        assert!(!repeats_by_default(Keysym::Right, &[step, Action::Close]));
+        assert!(!repeats_by_default(
+            Keysym::Return,
+            &[Action::Execute("kitty".into())]
+        ));
+        assert!(!repeats_by_default(Keysym::Return, &[]));
+        let volume = [Action::Execute("wpctl set-volume @DEFAULT_SINK@ 5%+".into())];
+        assert!(repeats_by_default(Keysym::XF86_AudioRaiseVolume, &volume));
+        assert!(!repeats_by_default(Keysym::XF86_AudioMute, &volume));
     }
 
     #[test]
